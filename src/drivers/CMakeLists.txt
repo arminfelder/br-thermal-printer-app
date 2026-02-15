@@ -13,6 +13,6 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-add_executable(server main.cpp)
+add_subdirectory(_common)
 
-target_link_libraries(server PRIVATE br_thermal)
+add_subdirectory(td2000)

@@ -13,6 +13,21 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-add_executable(server main.cpp)
+add_library(td2000)
 
-target_link_libraries(server PRIVATE br_thermal)
+add_library(drivers::td2000 ALIAS td2000)
+
+target_sources(td2000
+        PRIVATE
+        td2000.cpp
+)
+
+target_link_libraries(td2000 drivers::utils)
+
+target_compile_features(td2000 PUBLIC cxx_std_26)
+
+target_include_directories(td2000
+        PUBLIC
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+)

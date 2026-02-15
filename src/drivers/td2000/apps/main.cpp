@@ -14,15 +14,10 @@
 //    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 //
-// Created by armin on 23.09.25.
+// Created by armin on 14.02.26.
 //
 
-#include "BrThermal.h"
-
-int main(const int argc, char **argv)
+int main (int argc, char *argv[])
 {
-    BrThermal driver;
-
-    driver.runServer(argc, argv);
-
+    return 0;
 }

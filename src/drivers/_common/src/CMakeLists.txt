@@ -13,6 +13,19 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-add_executable(server main.cpp)
+add_library(utils)
 
-target_link_libraries(server PRIVATE br_thermal)
+add_library(drivers::utils ALIAS utils)
+
+target_sources(utils
+        PRIVATE
+        util.cpp
+)
+
+target_compile_features(utils PUBLIC cxx_std_23)
+
+target_include_directories(utils
+        PUBLIC
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+)

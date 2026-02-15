@@ -14,59 +14,40 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 cmake_minimum_required(VERSION 3.31)
+
 project(
-        br_thermal
+        td2000
         VERSION 0.1
-        DESCRIPTION "application for Brother Thermal printers"
-        LANGUAGES C CXX
-        #SPDX_LICENSE GPL-3.0-or-later
+        DESCRIPTION "td2000 series driver"
+        LANGUAGES CXX
 )
-
-# ==============================================================================
-# Build Reproducibility Configuration
-# ==============================================================================
-set(BUILD_RANDOM_SEED "thing3Aa1ush8alie3OhV0wei6Oa0quahtheoreech4EfaeBioXefawooZeshego")
-add_compile_options(-frandom-seed="${BUILD_RANDOM_SEED}")
-
-# ==============================================================================
-# Processor Detection
-# ==============================================================================
-include(ProcessorCount)
-ProcessorCount(NPROC)
-if (NOT NPROC OR NPROC EQUAL 0)
-    set(NPROC 1)
-endif ()
-
-# ==============================================================================
-# Safety Compile Flags
-# ==============================================================================
-include(${CMAKE_SOURCE_DIR}/cmake/SafetyFlags.cmake)
 
 # ==============================================================================
 # Dependencies
 # ==============================================================================
-include(${CMAKE_SOURCE_DIR}/cmake/PapplCups.cmake)
-pappl_cups_setup()
+if(NOT TARGET PAPPL::pappl)
+    include(../../../cmake/PapplCups.cmake)
+    pappl_cups_setup()
+endif()
 
 # ==============================================================================
 # Build Configuration
 # ==============================================================================
-include_directories(include)
+include_directories(${CMAKE_SOURCE_DIR}/include)
 
 # ==============================================================================
 # Main Targets
 # ==============================================================================
 add_subdirectory(src)
 
-if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
     add_subdirectory(apps)
-endif ()
+endif()
 
 # ==============================================================================
 # Testing
 # ==============================================================================
-include(CTest)
-if (BUILD_TESTING)
+if(BUILD_TESTING)
     enable_testing()
     add_subdirectory(tests)
-endif ()
+endif()
