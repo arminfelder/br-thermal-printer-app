@@ -241,7 +241,7 @@ TEST_CASE("VariousModeSettings::get() returns correct command", "[VariousModeSet
 TEST_CASE("PrintInformation::get() returns correct command", "[PrintInformation]") {
 
     SECTION("Returns correct size with default PrintInfo") {
-        types::PrintInfo info{};
+        types::PrintInfoFields info{};
         commands::PrintInformation cmd(info);
         auto result = cmd.get();
 
@@ -249,7 +249,7 @@ TEST_CASE("PrintInformation::get() returns correct command", "[PrintInformation]
     }
 
     SECTION("Contains correct command header") {
-        types::PrintInfo info{};
+        types::PrintInfoFields info{};
         commands::PrintInformation cmd(info);
         auto result = cmd.get();
 
@@ -259,7 +259,7 @@ TEST_CASE("PrintInformation::get() returns correct command", "[PrintInformation]
     }
 
     SECTION("Returns complete command sequence") {
-        types::PrintInfo info{};
+        types::PrintInfoFields info{};
         commands::PrintInformation cmd(info);
         auto result = cmd.get();
 
@@ -268,7 +268,7 @@ TEST_CASE("PrintInformation::get() returns correct command", "[PrintInformation]
     }
 
     SECTION("Multiple calls return same result") {
-        types::PrintInfo info{};
+        types::PrintInfoFields info{};
         commands::PrintInformation cmd(info);
 
         auto result1 = cmd.get();
@@ -278,7 +278,7 @@ TEST_CASE("PrintInformation::get() returns correct command", "[PrintInformation]
     }
 
     SECTION("Object can be constructed and destructed without issues") {
-        types::PrintInfo info{};
+        types::PrintInfoFields info{};
         info.mediaType = static_cast<uint8_t>(types::MediaType::DieCutLabels);
         info.mediaWith = 58;
         info.mediaLength = 100;
@@ -293,7 +293,7 @@ TEST_CASE("PrintInformation::get() returns correct command", "[PrintInformation]
     }
 
     SECTION("Works with different PrintInfo configurations") {
-        types::PrintInfo info{};
+        types::PrintInfoFields info{};
         info.validFields = static_cast<uint8_t>(types::PrintInfoFlags::pi_kind) |
                            static_cast<uint8_t>(types::PrintInfoFlags::pi_width);
         info.mediaType = static_cast<uint8_t>(types::MediaType::ContinuousLengthTape);
