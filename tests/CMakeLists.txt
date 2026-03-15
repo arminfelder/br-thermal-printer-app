@@ -21,6 +21,12 @@ FetchContent_Declare(
         GIT_TAG v3.12.0
 )
 FetchContent_MakeAvailable(Catch2)
+if(TARGET Catch2)
+    target_compile_options(Catch2 PRIVATE
+            -Wno-error
+            -Wno-switch-enum
+    )
+endif()
 #
 #add_executable(br_thermal_tests
 #        util.cpp

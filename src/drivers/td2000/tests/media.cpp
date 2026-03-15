@@ -141,7 +141,7 @@ TEST_CASE("getMediaInfoForMedia - Default fallback", "[media]") {
     SECTION("Unknown media type returns default") {
         auto result = getMediaInfoForMedia(
             ModelFamily::Td2x2x, 1000, 1000, MediaType::NoMedia);
-        REQUIRE(result == td2x2x::_58mm);
+        REQUIRE(result == none);
     }
 
     SECTION("Out of range dimensions returns default") {

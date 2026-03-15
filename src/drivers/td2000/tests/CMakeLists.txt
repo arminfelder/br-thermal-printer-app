@@ -23,6 +23,12 @@ if(NOT TARGET Catch2::Catch2)
     )
     FetchContent_MakeAvailable(Catch2)
     include(Catch)
+    if(TARGET Catch2)
+        target_compile_options(Catch2 PRIVATE
+                -Wno-error
+                -Wno-switch-enum
+        )
+    endif()
 endif()
 
 include(CTest)
