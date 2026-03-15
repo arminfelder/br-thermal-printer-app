@@ -135,7 +135,7 @@ namespace drivers::td2000
 
             info.pageType = (pageNumber == 0) ? types::PageType::startingPage : types::PageType::otherPage;
 
-            info.mediaWith = static_cast<uint8_t>(options->media.size_width/100);
+            info.mediaWidth = static_cast<uint8_t>(options->media.size_width/100);
             info.mediaLength = static_cast<uint8_t>(options->media.size_length/100);
 
             const auto rasterLineCount = options->header.cupsHeight;
