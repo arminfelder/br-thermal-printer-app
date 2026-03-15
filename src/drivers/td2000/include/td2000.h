@@ -19,17 +19,16 @@
 
 #ifndef BR_THERMAL_TD2000_H
 #define BR_THERMAL_TD2000_H
-
 #include <array>
-#include <string>
-#include <vector>
 #include <map>
 #include <set>
+#include <string>
+#include <type_traits>
+#include <vector>
 #include <pappl/pappl.h>
 
 namespace drivers::td2000
 {
-
     namespace types
     {
         enum class ModelFamily
@@ -42,6 +41,7 @@ namespace drivers::td2000
             int x;
             int y;
         };
+
         enum class ModelCode : uint8_t
         {
             Td2020 = 0x33,
@@ -104,7 +104,7 @@ namespace drivers::td2000
             AcAdapterInUse = 0x04,
         };
 
-        enum class ContinuosLengthTape : uint8_t
+        enum class ContinuousLengthTape : uint8_t
         {
             _57MM,
             _58MM
@@ -146,17 +146,33 @@ namespace drivers::td2000
         struct __attribute__((packed)) PrintInfoFields{
             uint8_t validFields:8;
             uint8_t mediaType:8;
-            uint8_t mediaWith:8;
+            uint8_t mediaWidth:8;
             uint8_t mediaLength:8;
             uint8_t rasterNumber[4];
             PageType pageType;
             uint8_t :8;
         };
+
         static_assert(sizeof(PrintInfoFields) == 10, "PrintInfo must match protocol size (10 bytes)");
         static_assert(std::is_trivially_copyable_v<PrintInfoFields>);
 
-        //TODO: refactor to prevent undefined behaviour under C++
+        template <typename Fields, std::size_t Size>
+        struct PackedProtocolBlock {
+            static_assert(sizeof(Fields) == Size, "Protocol field size must match raw buffer size");
+            static_assert(std::is_trivially_copyable_v<Fields>, "Protocol fields must be trivially copyable");
 
+            std::array<uint8_t, Size> raw{};
+
+            [[nodiscard]] Fields fields() const noexcept {
+                return std::bit_cast<Fields>(raw);
+            }
+
+            void set_fields(const Fields& value) noexcept {
+                raw = std::bit_cast<std::array<uint8_t, Size>>(value);
+            }
+        };
+
+        //TODO: refactor to prevent undefined behaviour under C++
         struct __attribute__((packed)) ErrorInformation1Fields
         {
             bool noMedia : 1;
@@ -183,6 +199,7 @@ namespace drivers::td2000
             bool mediaCannotBeFed : 1;
             bool systemError : 1;
         };
+
         static_assert(sizeof(ErrorInformation2Fields) == 1, "ErrorInformation2 must match protocol size (1 bytes)");
         static_assert(std::is_trivially_copyable_v<ErrorInformation2Fields>);
 
@@ -197,17 +214,7 @@ namespace drivers::td2000
         static_assert(sizeof(VariousModeSettingsFields) == 1, "VariousModeSettingsFields must match protocol size (1 bytes)");
         static_assert(std::is_trivially_copyable_v<VariousModeSettingsFields>);
 
-        struct VariousModeSettings {
-            std::array<uint8_t, 1> raw{};
-
-            [[nodiscard]] VariousModeSettingsFields fields() const noexcept {
-                return std::bit_cast<VariousModeSettingsFields>(raw);
-            }
-
-            void set_fields(const VariousModeSettingsFields& fields) noexcept {
-                raw = std::bit_cast<std::array<uint8_t, 1>>(fields);
-            }
-        };
+        using VariousModeSettings = PackedProtocolBlock<VariousModeSettingsFields, 1>;
 
         struct __attribute__((packed)) PrinterInfoFields
         {
@@ -241,23 +248,11 @@ namespace drivers::td2000
         static_assert(sizeof(PrinterInfoFields) == 32, "PrinterInfoFields must match protocol size (32 bytes)");
         static_assert(std::is_trivially_copyable_v<PrinterInfoFields>);
 
-        struct PrinterInfo {
-            std::array<uint8_t, 32> raw{};
+        using PrinterInfo = PackedProtocolBlock<PrinterInfoFields, 32>;
 
-            [[nodiscard]] PrinterInfoFields fields() const noexcept {
-                return std::bit_cast<PrinterInfoFields>(raw);
-            }
-
-            void set_fields(const PrinterInfoFields& fields) noexcept {
-                raw = std::bit_cast<std::array<uint8_t, 32>>(fields);
-            }
-        };
-
-
-        //TODO: work in progress
         struct __attribute__((packed)) MediaInfoFields {
             uint8_t  sensorId;
-            uint8_t  EnergyRank;
+            uint8_t  energyRank;
             uint8_t  paperWidth;
             uint8_t  rollLenMm;
             uint8_t  unknown4;

@@ -280,7 +280,7 @@ TEST_CASE("PrintInformation::get() returns correct command", "[PrintInformation]
     SECTION("Object can be constructed and destructed without issues") {
         types::PrintInfoFields info{};
         info.mediaType = static_cast<uint8_t>(types::MediaType::DieCutLabels);
-        info.mediaWith = 58;
+        info.mediaWidth = 58;
         info.mediaLength = 100;
 
         {
@@ -297,7 +297,7 @@ TEST_CASE("PrintInformation::get() returns correct command", "[PrintInformation]
         info.validFields = static_cast<uint8_t>(types::PrintInfoFlags::pi_kind) |
                            static_cast<uint8_t>(types::PrintInfoFlags::pi_width);
         info.mediaType = static_cast<uint8_t>(types::MediaType::ContinuousLengthTape);
-        info.mediaWith = 57;
+        info.mediaWidth = 57;
 
         commands::PrintInformation cmd(info);
         auto result = cmd.get();
