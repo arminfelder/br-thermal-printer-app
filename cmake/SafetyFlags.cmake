@@ -13,6 +13,9 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+# based on https://airbus-seclab.github.io/c-compiler-security/
+# adds stricter flags like -Wunsafe-buffer-usage
+
 include(CheckCXXCompilerFlag)
 
 # === Warning Configuration ===
