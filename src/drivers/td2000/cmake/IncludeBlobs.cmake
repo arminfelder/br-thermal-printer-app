@@ -7,6 +7,9 @@ function(generate_bin_inc input_bin output_inc var_name namespace_name)
     set(VAR_NAME ${var_name})
     set(NAMESPACE ${namespace_name})
 
+    string(REPLACE "::" "_" GUARD_NS "${namespace_name}")
+    string(TOUPPER "${GUARD_NS}${var_name}" HEADER_GUARD)
+
     set(BYTE_LIST "")
     set(COL 0)
 
