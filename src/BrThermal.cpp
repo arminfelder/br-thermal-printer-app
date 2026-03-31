@@ -69,11 +69,10 @@ bool BrThermal::driver_cb([[maybe_unused]] pappl_system_t* system, [[maybe_unuse
     const int num_did = papplDeviceParseID(device_id, &did);
     const auto model = std::string_view(cupsGetOption("MDL", num_did, did));
 
-    if (std::strcmp(driver_name, "brother_td_2000") == 0)
-    {
-        return drivers::td2000::updateDriverData(driver_data, model);
-    }
-
+        if (std::string_view(driver_name) == "brother_td_2000")
+        {
+            return drivers::td2000::updateDriverData(driver_data, model);
+        }
     return false;
 }
 

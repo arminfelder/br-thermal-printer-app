@@ -38,6 +38,7 @@ include_directories(${CMAKE_SOURCE_DIR}/include)
 # ==============================================================================
 # Main Targets
 # ==============================================================================
+add_subdirectory(data)
 add_subdirectory(src)
 
 if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)

@@ -67,6 +67,7 @@ endif ()
 # ==============================================================================
 include(CTest)
 if (BUILD_TESTING)
+    set(ENABLE_SANITIZERS ON CACHE BOOL "Enable runtime sanitizers for debug builds" FORCE)
     enable_testing()
     add_subdirectory(tests)
 endif ()
