@@ -17,6 +17,7 @@
 
 #include <memory>
 #include <span>
+#include <thread>
 
 extern "C" {
 #include <pappl/pappl.h>
@@ -116,11 +117,11 @@ namespace drivers::td2000
             types::PrintInfoFields info{};
 
             types::MediaType mediaType{};
-            if (strcmp(options->media.type, "continuous") == 0)
+            if (std::string_view(options->media.type) == "continuous" == 0)
             {
                 mediaType = types::MediaType::ContinuousLengthTape;
 
-            }else if (strcmp(options->media.type, "continuous-label") == 0)
+            }else if (std::string_view(options->media.type) == "continuous-label" == 0)
             {
                 mediaType = types::MediaType::DieCutLabels;
             } else
@@ -204,7 +205,9 @@ namespace drivers::td2000
             }
 
             const auto bytesPerLine = jobData->bytesPerLine;
+#pragma clang unsafe_buffer_usage begin
             const std::span lineData(pixels, bytesPerLine);
+#pragma clang unsafe_buffer_usage end
 
             const auto jobId = papplJobGetID(job);
             const auto mirroredLine = util::mirrorLine(lineData);
@@ -263,8 +266,70 @@ namespace drivers::td2000
 
         bool getStatus([[maybe_unused]] pappl_printer_t *printer)
         {
+
+            const auto device = papplPrinterOpenDevice(printer);
+            const auto uri = papplPrinterGetDeviceURI(printer);
+
+            if (!printerStatusPolling.contains(uri))
+            {
+                printerStatusPolling[uri] = false;
+            }
+
+            if (printerStatusPolling.at(uri) == false)
+            {
+                const commands::StatusInformationRequest cmd;
+
+                if (util::writeToDevice(cmd.get(), device, -1 ) != true)
+                {
+                    return false;
+                }
+                types::PrinterInfo info{0};
+                for (;;)
+                {
+                    const auto result = papplDeviceRead(device, info.raw.data(), info.raw.size());
+                    if (result == -1)
+                    {
+                        papplLogPrinter(printer, PAPPL_LOGLEVEL_ERROR, "Failed to read status");
+                        papplPrinterCloseDevice(printer);
+                        papplPrinterSetReasons(printer, PAPPL_PREASON_OTHER | PAPPL_PREASON_OFFLINE, PAPPL_PREASON_NONE);
+                        return false;
+                    }
+                    if (info.fields().printHeadMark == 0x80) break;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                }
+
+                papplPrinterSetReasons(printer, PAPPL_PREASON_NONE, PAPPL_PREASON_NONE);
+                const auto fields = info.fields();
+                if (fields.statusType == types::StatusType::ErrorOccurred)
+                {
+                    unsigned int status = 0;
+                    if (fields.errorInformation2.coverOpen) status |= PAPPL_PREASON_COVER_OPEN;
+                    if (fields.errorInformation1.noMedia || fields.errorInformation1.endOfMedia ||fields.errorInformation2.replacingMedia)
+                        status |= PAPPL_PREASON_MEDIA_EMPTY | PAPPL_PREASON_MEDIA_NEEDED;
+                    if (fields.errorInformation1.printerInUse) status |= PAPPL_PREASON_OTHER;
+                    if (fields.errorInformation2.mediaCannotBeFed) status |= PAPPL_PREASON_MEDIA_JAM;
+                    if (fields.errorInformation2.systemError) status |= PAPPL_PREASON_OTHER;
+                    if (fields.errorInformation2.communicationError) status |= PAPPL_PREASON_OTHER;
+                    papplPrinterSetReasons(printer, status, PAPPL_PREASON_NONE);
+                }
+                else if (fields.statusType == types::StatusType::TurnedOff)
+                {
+                    papplPrinterSetReasons(printer, PAPPL_PREASON_OFFLINE, PAPPL_PREASON_NONE);
+                }
+                else
+                {
+                    papplPrinterSetReasons(printer, PAPPL_PREASON_NONE, 0xFFFF);
+                }
+                papplPrinterCloseDevice(printer);
+                printerStatus[uri] = info;
+
+                return true;
+                //return query_and_update_status(printer);
+            }else
+            {
+                return true;
+            }
             return true;
-            //return query_and_update_status(printer);
         }
     }
 
@@ -464,7 +529,7 @@ namespace drivers::td2000
                 return false;
             }
 
-            papplCopyString(driverData->media_default.size_name, defaultMedia[0] , sizeof(defaultMedia[0])*strlen(defaultMedia[0]));
+            papplCopyString(driverData->media_default.size_name, defaultMedia[0] , std::string_view(defaultMedia[0]).size() + 1);
             if (const pwg_media_t *pwg = pwgMediaForPWG(driverData->media_default.size_name))
             {
                 driverData->media_default.size_width  = pwg->width;

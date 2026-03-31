@@ -31,3 +31,7 @@ target_include_directories(td2000
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
 )
+
+target_include_directories(td2000 PUBLIC
+        "${CMAKE_CURRENT_BINARY_DIR}/../data/generated"
+)

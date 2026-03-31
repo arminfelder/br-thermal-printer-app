@@ -26,6 +26,7 @@
 #include <type_traits>
 #include <vector>
 #include <pappl/pappl.h>
+#include "media_generated.inc"
 
 namespace drivers::td2000
 {
@@ -635,121 +636,55 @@ namespace drivers::td2000
             .raw =  {}
         };
 
+
+
+#define DEFINE_MEDIA_INFO(ns, name) \
+    constexpr inline types::MediaInfo name = { .raw = blobs::ns::name }
+
         namespace td2x2x
         {
-            constexpr inline types::MediaInfo _58mm = {
-                .raw {
-#embed "../data/media/td2x2x/58mm.bin"
-                }
-            };
-
-            constexpr inline types::MediaInfo _57mm = {
-                .raw {
-#embed "../data/media/td2x2x/57mm.bin"
-                }
-            };
-
-            constexpr inline types::MediaInfo _60x60mm{
-                .raw {
-#embed "../data/media/td2x2x/60x60mm.bin"
-                }
-            };
-            constexpr inline types::MediaInfo _51x26mm = {
-                .raw {
-#embed "../data/media/td2x2x/51x26mm.bin"
-                }
-            };
-
-            constexpr inline types::MediaInfo _50x30mm = {
-                .raw {
-#embed "../data/media/td2x2x/50x30mm.bin"
-                }
-            };
-
-            constexpr inline types::MediaInfo _40x60mm = {
-                .raw {
-#embed "../data/media/td2x2x/40x60mm.bin"
-                }
-            };
-
-            constexpr inline types::MediaInfo _40x50mm = {
-                .raw {
-#embed "../data/media/td2x2x/40x60mm.bin"
-                }
-            };
-
-            constexpr inline types::MediaInfo _40x40mm = {
-                .raw {
-#embed "../data/media/td2x2x/40x40mm.bin"
-                }
-            };
-
-            constexpr inline types::MediaInfo _30x30mm = {
-                .raw {
-#embed "../data/media/td2x2x/30x30mm.bin"
-                }
-            };
+            DEFINE_MEDIA_INFO(td2x2x, _58mm);
+            DEFINE_MEDIA_INFO(td2x2x, _57mm);
+            DEFINE_MEDIA_INFO(td2x2x, _60x60mm);
+            DEFINE_MEDIA_INFO(td2x2x, _51x26mm);
+            DEFINE_MEDIA_INFO(td2x2x, _50x30mm);
+            DEFINE_MEDIA_INFO(td2x2x, _40x60mm);
+            DEFINE_MEDIA_INFO(td2x2x, _40x50mm);
+            DEFINE_MEDIA_INFO(td2x2x, _40x40mm);
+            DEFINE_MEDIA_INFO(td2x2x, _30x30mm);
         }
         namespace td2x3x
         {
-            constexpr inline types::MediaInfo _58mm = {
-                .raw {
-                    #embed "../data/media/td2x3x/58mm.bin"
-                }
-            };
-
-            constexpr inline types::MediaInfo _57mm = {
-                .raw {
-                    #embed "../data/media/td2x3x/57mm.bin"
-                }
-            };
-
-            constexpr inline types::MediaInfo _60x60mm{
-                .raw {
-                    #embed "../data/media/td2x3x/60x60mm.bin"
-                }
-            };
-            constexpr inline types::MediaInfo _51x26mm = {
-                .raw {
-                    #embed "../data/media/td2x3x/51x26mm.bin"
-                }
-            };
-
-            constexpr inline types::MediaInfo _50x30mm = {
-                .raw {
-                    #embed "../data/media/td2x3x/50x30mm.bin"
-                }
-            };
-
-            constexpr inline types::MediaInfo _40x60mm = {
-                .raw {
-                    #embed "../data/media/td2x3x/40x60mm.bin"
-                }
-            };
-
-            constexpr inline types::MediaInfo _40x50mm = {
-                .raw {
-                    #embed "../data/media/td2x3x/40x60mm.bin"
-                }
-            };
-
-            constexpr inline types::MediaInfo _40x40mm = {
-                .raw {
-                    #embed "../data/media/td2x3x/40x40mm.bin"
-                }
-            };
-
-            constexpr inline types::MediaInfo _30x30mm = {
-                .raw {
-                    #embed "../data/media/td2x3x/30x30mm.bin"
-                }
-            };
+            DEFINE_MEDIA_INFO(td2x3x, _58mm);
+            DEFINE_MEDIA_INFO(td2x3x, _57mm);
+            DEFINE_MEDIA_INFO(td2x3x, _60x60mm);
+            DEFINE_MEDIA_INFO(td2x3x, _51x26mm);
+            DEFINE_MEDIA_INFO(td2x3x, _50x30mm);
+            DEFINE_MEDIA_INFO(td2x3x, _40x60mm);
+            DEFINE_MEDIA_INFO(td2x3x, _40x50mm);
+            DEFINE_MEDIA_INFO(td2x3x, _40x40mm);
+            DEFINE_MEDIA_INFO(td2x3x, _30x30mm);
         }
+
+#undef DEFINE_MEDIA_INFO
+
         bool startJob(pappl_job_t *job, pappl_pr_options_t *options, pappl_device_t *device);
         bool startPage(pappl_job_t *job, pappl_pr_options_t *options, pappl_device_t *device, unsigned pageNumber);
         bool writeLine(pappl_job_t *job, pappl_pr_options_t *options, pappl_device_t *device, unsigned pageNumber, const unsigned char *pixels);
         bool getStatus(pappl_printer_t *printer);
     }
+
+    namespace callbacks
+    {
+        bool print(pappl_job_t *job, pappl_pr_options_t *options, pappl_device_t *device);
+        bool startJob(pappl_job_t *job, pappl_pr_options_t *options, pappl_device_t *device);
+        bool startPage(pappl_job_t *job, pappl_pr_options_t *options, pappl_device_t *device, unsigned pageNumber);
+        bool writeLine(pappl_job_t *job, pappl_pr_options_t *options, pappl_device_t *device, unsigned pageNumber, const unsigned char *pixels);
+        bool endPage(pappl_job_t *job, pappl_pr_options_t *options, pappl_device_t *device, unsigned pageNumber);
+        bool endJob(pappl_job_t *job, pappl_pr_options_t *options, pappl_device_t *device);
+        bool getStatus(pappl_printer_t *printer);
+    }
+
     bool updateDriverData(pappl_pr_driver_data_t* driverData, const std::string_view& model);
 
     const std::map<std::string_view, types::ModelFamily> modelFamilyMap = {
@@ -814,6 +749,9 @@ namespace drivers::td2000
     const std::set<std::string_view> supportedPrinters {
         "TD-2020","TD-2120N","TD-2130N","TD-2030A","TD-2125N","TD-2125NW","TD-2135N","TD-2135NW"
     };
+    
+    static std::map<std::string, types::PrinterInfo> printerStatus{};
+    static std::map<std::string, bool> printerStatusPolling{};
 
 }
 

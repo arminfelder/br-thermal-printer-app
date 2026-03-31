@@ -1,0 +1,10 @@
+#pragma once
+#include <array>
+#include <cstddef>
+#include <cstdint>
+
+namespace @NAMESPACE@ {
+    inline constexpr std::array<std::uint8_t, @BYTE_COUNT@> @VAR_NAME@ = {
+@BYTE_LIST@
+    };
+}
