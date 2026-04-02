@@ -547,7 +547,7 @@ namespace drivers::td2000
             [[nodiscard]] std::vector<uint8_t> get() const noexcept
             {
                 std::vector<uint8_t> data;
-                data.reserve(raster_graphics_transfer.size()+2+numberOfBytes);
+                data.reserve(raster_graphics_transfer.size()+2+static_cast<size_t>(numberOfBytes));
                 data.insert(data.end(), raster_graphics_transfer.begin(), raster_graphics_transfer.end());
                 data.push_back(0);
                 data.push_back(static_cast<uint8_t>(numberOfBytes));

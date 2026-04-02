@@ -117,11 +117,11 @@ namespace drivers::td2000
             types::PrintInfoFields info{};
 
             types::MediaType mediaType{};
-            if (std::string_view(options->media.type) == "continuous" == 0)
+            if ((std::string_view(options->media.type) == "continuous") == 0)
             {
                 mediaType = types::MediaType::ContinuousLengthTape;
 
-            }else if (std::string_view(options->media.type) == "continuous-label" == 0)
+            }else if ((std::string_view(options->media.type) == "continuous-label") == 0)
             {
                 mediaType = types::MediaType::DieCutLabels;
             } else
@@ -205,9 +205,13 @@ namespace drivers::td2000
             }
 
             const auto bytesPerLine = jobData->bytesPerLine;
+#ifdef __clang__
 #pragma clang unsafe_buffer_usage begin
-            const std::span lineData(pixels, bytesPerLine);
+#endif
+            const std::span lineData(pixels, static_cast<size_t>(bytesPerLine));
+#ifdef __clang__
 #pragma clang unsafe_buffer_usage end
+#endif
 
             const auto jobId = papplJobGetID(job);
             const auto mirroredLine = util::mirrorLine(lineData);
@@ -229,7 +233,7 @@ namespace drivers::td2000
                 return false;
             }
 
-            if (const unsigned pageCount = papplJobGetImpressions(job); pageNumber < pageCount-1 )
+            if (const auto pageCount = static_cast<unsigned>(papplJobGetImpressions(job)); pageNumber < pageCount-1 )
             {
                 const commands::Print print;
                 if (const auto job_id = papplJobGetID(job); util::writeToDevice(print.get(), device, job_id) != true)

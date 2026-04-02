@@ -79,7 +79,7 @@ namespace util
             {
                 // Run of identical bytes: use RLE
                 // For runs of n identical bytes, store (257-n) followed by the byte
-                compressed.push_back(static_cast<char>(257 - runLength));
+                compressed.push_back(static_cast<unsigned char>(257 - runLength));
                 compressed.push_back(currentByte);
                 i += runLength;
             }
