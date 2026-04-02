@@ -12,13 +12,42 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
 # based on https://airbus-seclab.github.io/c-compiler-security/
-# adds stricter flags like -Wunsafe-buffer-usage
 
 include(CheckCXXCompilerFlag)
 
-# === Warning Configuration ===
+# ---------------------------------------------------------------------------
+# Helper macros
+# ---------------------------------------------------------------------------
+
+# Probe FLAG; if supported, append it to LIST_VAR.
+macro(try_add_flag LIST_VAR FLAG)
+    string(MAKE_C_IDENTIFIER "HAS${FLAG}" _probe_var)
+    check_cxx_compiler_flag("${FLAG}" ${_probe_var})
+    if (${_probe_var})
+        list(APPEND ${LIST_VAR} "${FLAG}")
+    endif ()
+endmacro()
+
+# Try PREFERRED_FLAG first; if unsupported, fall back to FALLBACK_FLAG.
+# Both are probed; whichever is available (preferred wins) is appended to LIST_VAR.
+macro(try_add_flag_or_fallback LIST_VAR PREFERRED_FLAG FALLBACK_FLAG)
+    string(MAKE_C_IDENTIFIER "HAS${PREFERRED_FLAG}" _pref_var)
+    check_cxx_compiler_flag("${PREFERRED_FLAG}" ${_pref_var})
+    if (${_pref_var})
+        list(APPEND ${LIST_VAR} "${PREFERRED_FLAG}")
+    else ()
+        string(MAKE_C_IDENTIFIER "HAS${FALLBACK_FLAG}" _fall_var)
+        check_cxx_compiler_flag("${FALLBACK_FLAG}" ${_fall_var})
+        if (${_fall_var})
+            list(APPEND ${LIST_VAR} "${FALLBACK_FLAG}")
+        endif ()
+    endif ()
+endmacro()
+
+# ---------------------------------------------------------------------------
+# Warning flags shared by GCC and Clang
+# ---------------------------------------------------------------------------
 set(WARNING_FLAGS
         -Wall
         -Wextra
@@ -28,7 +57,7 @@ set(WARNING_FLAGS
         -Wformat-security
         -Wnull-dereference
         -Wcast-qual
-        -Wcast-align
+        -Wcast-align           # plain form: supported by both GCC and Clang
         -Wshadow
         -Wundef
         -Wdouble-promotion
@@ -36,153 +65,153 @@ set(WARNING_FLAGS
         -Wmissing-field-initializers
         -Wnon-virtual-dtor
         -Woverloaded-virtual
+        -Wconversion
+        -Wsign-conversion
+        -Wimplicit-fallthrough
+        -Wvla
+        -Walloca
 )
 
-if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+# ---------------------------------------------------------------------------
+# Compiler-specific warning flags
+# ---------------------------------------------------------------------------
+if (CMAKE_CXX_COMPILER_ID MATCHES "GNU")
     list(APPEND WARNING_FLAGS
-            -Wformat-signedness
-            -Wstack-protector
-            -Walloca
-            -Wvla
+            -Wcast-align=strict       # GCC-only: stricter alignment checking
+            -Wformat-signedness       # GCC-only
+            -Wstack-protector         # GCC-only
+            -Wtrampolines             # GCC-only: warns about nested function trampolines
+            -Wlogical-op              # GCC-only: suspicious logical operator use
+            -Wduplicated-cond         # GCC-only: duplicated conditions in if/else-if
+            -Wduplicated-branches     # GCC-only: if/else branches with identical bodies
+            -Wuse-after-free=2        # GCC-only
     )
-elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+elseif (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     list(APPEND WARNING_FLAGS
-            -Wvla
-            -Walloca
+            -Wunsafe-buffer-usage     # Clang-only: unsafe pointer/array access patterns
     )
-endif()
+endif ()
 
-# Optional warnings, only enabled if supported by the compiler
-check_cxx_compiler_flag("-Wformat-overflow=2" HAS_WFORMAT_OVERFLOW)
-if(HAS_WFORMAT_OVERFLOW)
-    list(APPEND WARNING_FLAGS -Wformat-overflow=2)
-endif()
+# ---------------------------------------------------------------------------
+# Conditionally supported warnings (probed at configure time)
+# ---------------------------------------------------------------------------
 
-check_cxx_compiler_flag("-Wformat-truncation=2" HAS_WFORMAT_TRUNCATION)
-if(HAS_WFORMAT_TRUNCATION)
-    list(APPEND WARNING_FLAGS -Wformat-truncation=2)
-endif()
+# GCC >= 7 / not in Clang
+try_add_flag(WARNING_FLAGS -Wformat-overflow=2)
+try_add_flag(WARNING_FLAGS -Wformat-truncation=2)
 
-check_cxx_compiler_flag("-Warray-bounds=2" HAS_WARRAY_BOUNDS)
-if(HAS_WARRAY_BOUNDS)
-    list(APPEND WARNING_FLAGS -Warray-bounds=2)
-endif()
+# GCC-only
+try_add_flag(WARNING_FLAGS -Wstringop-overflow=4)
 
-check_cxx_compiler_flag("-Wstringop-overflow=4" HAS_WSTRINGOP_OVERFLOW)
-if(HAS_WSTRINGOP_OVERFLOW)
-    list(APPEND WARNING_FLAGS -Wstringop-overflow=4)
-endif()
+# GCC-only: warn if a function uses more stack than the given limit
+try_add_flag(WARNING_FLAGS -Wstack-usage=1000000)
 
-check_cxx_compiler_flag("-Wshift-overflow=2" HAS_WSHIFT_OVERFLOW)
-if(HAS_WSHIFT_OVERFLOW)
-    list(APPEND WARNING_FLAGS -Wshift-overflow=2)
-endif()
+# GCC supports =2, Clang only supports bare -Warray-bounds
+try_add_flag_or_fallback(WARNING_FLAGS -Warray-bounds=2 -Warray-bounds)
 
-check_cxx_compiler_flag("-Wstrict-overflow=4" HAS_WSTRICT_OVERFLOW)
-if(HAS_WSTRICT_OVERFLOW)
-    list(APPEND WARNING_FLAGS -Wstrict-overflow=4)
-endif()
+# GCC supports =2, Clang supports bare -Wshift-overflow
+try_add_flag_or_fallback(WARNING_FLAGS -Wshift-overflow=2 -Wshift-overflow)
 
-check_cxx_compiler_flag("-Wstack-usage=1000000" HAS_WSTACK_USAGE)
-if(HAS_WSTACK_USAGE)
-    list(APPEND WARNING_FLAGS -Wstack-usage=1000000)
-endif()
+# Both support bare form; =4 is GCC-only
+try_add_flag_or_fallback(WARNING_FLAGS -Wstrict-overflow=4 -Wstrict-overflow)
 
-check_cxx_compiler_flag("-Wlogical-op" HAS_WLOGICAL_OP)
-if(HAS_WLOGICAL_OP)
-    list(APPEND WARNING_FLAGS -Wlogical-op)
-endif()
+# Supported by both GCC and Clang; probed to avoid issues on unusual toolchains
+try_add_flag(WARNING_FLAGS -Wswitch-default)
+try_add_flag(WARNING_FLAGS -Wswitch-enum)
+try_add_flag(WARNING_FLAGS -Wold-style-cast)
 
-check_cxx_compiler_flag("-Wduplicated-cond" HAS_WDUPLICATED_COND)
-if(HAS_WDUPLICATED_COND)
-    list(APPEND WARNING_FLAGS -Wduplicated-cond)
-endif()
+# GCC-only: warns on casts to a type that are the same type (e.g. (int)(int)x)
+try_add_flag(WARNING_FLAGS -Wuseless-cast)
 
-check_cxx_compiler_flag("-Wduplicated-branches" HAS_WDUPLICATED_BRANCHES)
-if(HAS_WDUPLICATED_BRANCHES)
-    list(APPEND WARNING_FLAGS -Wduplicated-branches)
-endif()
+# Supported by both
+try_add_flag(WARNING_FLAGS -Wzero-as-null-pointer-constant)
 
-check_cxx_compiler_flag("-Wswitch-default" HAS_WSWITCH_DEFAULT)
-if(HAS_WSWITCH_DEFAULT)
-    list(APPEND WARNING_FLAGS -Wswitch-default)
-endif()
-
-check_cxx_compiler_flag("-Wswitch-enum" HAS_WSWITCH_ENUM)
-if(HAS_WSWITCH_ENUM)
-    list(APPEND WARNING_FLAGS -Wswitch-enum)
-endif()
-
-check_cxx_compiler_flag("-Wtrampolines" HAS_WTRAMPOLINES)
-if(HAS_WTRAMPOLINES)
-    list(APPEND WARNING_FLAGS -Wtrampolines)
-endif()
-
-check_cxx_compiler_flag("-Wunsafe-buffer-usage" HAS_WUNSAFE_BUFFER_USAGE)
-if(HAS_WUNSAFE_BUFFER_USAGE)
-    list(APPEND WARNING_FLAGS -Wunsafe-buffer-usage)
-endif()
-
-check_cxx_compiler_flag("-Wuse-after-free=2" HAS_WUSE_AFTER_FREE)
-if(HAS_WUSE_AFTER_FREE)
-    list(APPEND WARNING_FLAGS -Wuse-after-free=2)
-endif()
-
-check_cxx_compiler_flag("-Wold-style-cast" HAS_WOLD_STYLE_CAST)
-if(HAS_WOLD_STYLE_CAST)
-    list(APPEND WARNING_FLAGS -Wold-style-cast)
-endif()
-
-check_cxx_compiler_flag("-Wuseless-cast" HAS_WUSELESS_CAST)
-if(HAS_WUSELESS_CAST)
-    list(APPEND WARNING_FLAGS -Wuseless-cast)
-endif()
-
-check_cxx_compiler_flag("-Wzero-as-null-pointer-constant" HAS_WZERO_AS_NULL_POINTER_CONSTANT)
-if(HAS_WZERO_AS_NULL_POINTER_CONSTANT)
-    list(APPEND WARNING_FLAGS -Wzero-as-null-pointer-constant)
-endif()
-
+# ---------------------------------------------------------------------------
+# C-only flags (guarded by generator expression)
+# ---------------------------------------------------------------------------
 set(C_SPECIFIC_FLAGS
         "$<$<COMPILE_LANGUAGE:C>:-Wtraditional-conversion>"
         "$<$<COMPILE_LANGUAGE:C>:-Wstrict-prototypes>"
 )
 
-# === Hardening Flags ===
+# ---------------------------------------------------------------------------
+# Hardening flags
+# ---------------------------------------------------------------------------
 set(SECURITY_HARDENING_FLAGS
         -fstack-protector-strong
-        -fstack-clash-protection
         -fPIE
         -D_GLIBCXX_ASSERTIONS
 )
 
-check_cxx_compiler_flag("-fstack-clash-protection" HAS_FSTACK_CLASH_PROTECTION)
-if(HAS_FSTACK_CLASH_PROTECTION)
-    list(APPEND SECURITY_HARDENING_FLAGS -fstack-clash-protection)
-endif()
+# Supported by GCC >= 8 and Clang >= 7; probe to be safe
+try_add_flag(SECURITY_HARDENING_FLAGS -fstack-clash-protection)
 
-# === Release-Hardened Profile ===
+# Zero-initialise trivial automatic variables (GCC >= 12, Clang >= 8)
+try_add_flag(SECURITY_HARDENING_FLAGS -ftrivial-auto-var-init=zero)
+
+# Intel CET control-flow enforcement (x86 Linux, GCC >= 8, Clang >= 7)
+# -fcf-protection=full enables both IBT (indirect branch tracking) and SHSTK (shadow stack)
+try_add_flag(SECURITY_HARDENING_FLAGS -fcf-protection=full)
+
+# Control-flow integrity: Clang-only
+# Requires -flto and a compatible linker (lld recommended).
+# To enable: add -flto -fsanitize=cfi to both compile and link options.
+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    check_cxx_compiler_flag("-fsanitize=cfi" HAS_FSANITIZE_CFI)
+    # CFI is intentionally not auto-enabled here as it requires LTO setup;
+    # left as a documented option for hardened release builds.
+endif ()
+
+# ---------------------------------------------------------------------------
+# Linker hardening flags
+# ---------------------------------------------------------------------------
+# -pie:           Produces a Position Independent Executable (required for ASLR)
+# -z relro:       Makes the GOT and other data read-only after startup
+# -z now:         Resolves all symbols at load time (full RELRO), prevents GOT overwrites
+# -z noexecstack: Marks the stack segment as non-executable
+set(HARDENING_LINK_FLAGS
+        -pie
+        -Wl,-z,relro
+        -Wl,-z,now
+        -Wl,-z,noexecstack
+)
+
+# ---------------------------------------------------------------------------
+# Apply all flags globally
+# ---------------------------------------------------------------------------
 add_compile_options(${WARNING_FLAGS})
 add_compile_options(${C_SPECIFIC_FLAGS})
 add_compile_options(${SECURITY_HARDENING_FLAGS})
-add_compile_definitions(_FORTIFY_SOURCE=3)
+add_link_options(${HARDENING_LINK_FLAGS})
 
-# === Debug-Sanitized Profile ===
+# _FORTIFY_SOURCE requires at least -O1 to be effective.
+# Guard against Debug builds where CMake injects -O0.
+if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+    add_compile_definitions(_FORTIFY_SOURCE=3)
+endif ()
+
+# ---------------------------------------------------------------------------
+# Debug-sanitized profile
+# ---------------------------------------------------------------------------
 option(ENABLE_SANITIZERS "Enable runtime sanitizers for debug builds" OFF)
-
-if(ENABLE_SANITIZERS)
-    add_compile_options(
+if (ENABLE_SANITIZERS)
+    message(STATUS "[SafetyFlags] Sanitizers ENABLED — do not use this binary in production")
+    set(SANITIZER_FLAGS
             -O1
             -g
             -fno-omit-frame-pointer
-            -fsanitize=address,undefined
+            -fsanitize=address,undefined,leak
     )
-    add_link_options(
-            -fsanitize=address,undefined
+    set(SANITIZER_LINK_FLAGS
+            -fsanitize=address,undefined,leak
     )
-endif()
+    add_compile_options(${SANITIZER_FLAGS})
+    add_link_options(${SANITIZER_LINK_FLAGS})
+endif ()
 
-# === Common Optimization Level for non-sanitized builds ===
-if(NOT ENABLE_SANITIZERS)
+# ---------------------------------------------------------------------------
+# Common optimization level for non-sanitized builds
+# ---------------------------------------------------------------------------
+if (NOT ENABLE_SANITIZERS)
     add_compile_options(-O2)
-endif()
+endif ()
