@@ -414,8 +414,10 @@ namespace drivers::td2000
             [[nodiscard]] std::vector<uint8_t> get() const noexcept
             {
                 std::vector<uint8_t> data;
-                data.reserve(print_information.size()+1);
+                data.reserve(print_information.size()+sizeof(printInfo));
                 data.insert(data.end(), print_information.begin(), print_information.end());
+                const auto infoBytes = std::bit_cast<std::array<uint8_t, 10>>(printInfo);
+                data.insert(data.end(), infoBytes.begin(), infoBytes.end());
                 return data;
             }
 

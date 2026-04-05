@@ -117,16 +117,18 @@ namespace drivers::td2000
             types::PrintInfoFields info{};
 
             types::MediaType mediaType{};
-            if ((std::string_view(options->media.type) == "continuous") == 0)
+            const std::string_view mediaTypeStr(options->media.type);
+            if (mediaTypeStr == "labels-continuous" || mediaTypeStr == "continuous")
             {
                 mediaType = types::MediaType::ContinuousLengthTape;
-
-            }else if ((std::string_view(options->media.type) == "continuous-label") == 0)
+            }
+            else if (mediaTypeStr == "labels")
             {
                 mediaType = types::MediaType::DieCutLabels;
-            } else
+            }
+            else
             {
-                papplLogJob(job, PAPPL_LOGLEVEL_ERROR, "unsupported media type:  %s", options->media.type);
+                papplLogJob(job, PAPPL_LOGLEVEL_ERROR, "unsupported media type: %s", options->media.type);
                 return false;
             }
 

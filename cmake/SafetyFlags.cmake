@@ -215,3 +215,6 @@ endif ()
 if (NOT ENABLE_SANITIZERS)
     add_compile_options(-O2)
 endif ()
+
+
+add_compile_options(-O0)
