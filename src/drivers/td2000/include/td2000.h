@@ -59,7 +59,7 @@ namespace drivers::td2000
         {
             NoMedia = 0x00,
             ContinuousLengthTape = 0x0A,
-            DieCutLabels = 0x4B,
+            DieCutLabels = 0x0B,  // spec p.29: print command encoding; status response uses 0x4B
         };
 
         enum class CompressionMode : uint8_t
@@ -689,7 +689,7 @@ namespace drivers::td2000
 
     bool updateDriverData(pappl_pr_driver_data_t* driverData, const std::string_view& model);
 
-    const std::map<std::string_view, types::ModelFamily> modelFamilyMap = {
+    inline const std::map<std::string_view, types::ModelFamily> modelFamilyMap = {
         {"TD-2020", types::ModelFamily::Td2x2x},
         {"TD-2120N", types::ModelFamily::Td2x2x},
         {"TD-2130N", types::ModelFamily::Td2x3x},
@@ -700,17 +700,17 @@ namespace drivers::td2000
         {"TD-2135NWB", types::ModelFamily::Td2x3x}
     };
 
-    const std::map<types::ModelFamily, types::Resolution> resolutions{
+    inline const std::map<types::ModelFamily, types::Resolution> resolutions{
         {types::ModelFamily::Td2x2x, {203, 203}},
         {types::ModelFamily::Td2x3x, {300, 300}},
     };
 
-    const std::map<types::ModelFamily, uint8_t> lineWidth{
+    inline const std::map<types::ModelFamily, uint8_t> lineWidth{
         {types::ModelFamily::Td2x2x, 56},
         {types::ModelFamily::Td2x3x, 84},
     };
 
-    const std::map<types::ModelFamily, types::Margins> margins{
+    inline const std::map<types::ModelFamily, types::Margins> margins{
         {types::ModelFamily::Td2x2x, {
             3,
             3,
@@ -723,6 +723,12 @@ namespace drivers::td2000
             0,
             0
         }}
+    };
+
+    // Minimum feed margin in dots for continuous tape per spec §2.6; die-cut must be 0
+    inline const std::map<types::ModelFamily, uint8_t> minFeedMarginDots{
+        {types::ModelFamily::Td2x2x, 24},  // 203 dpi
+        {types::ModelFamily::Td2x3x, 35},  // 300 dpi
     };
 
     constexpr std::array<const char*,13> defaultMedia{

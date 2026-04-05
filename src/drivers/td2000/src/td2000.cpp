@@ -60,13 +60,21 @@ namespace drivers::td2000
 
             cups_option_t *did = nullptr;
             const int numOptions = papplDeviceParseID(deviceId.data(), &did);
+            const char *mdl = cupsGetOption("MDL", numOptions, did);
+            const std::string model = mdl ? mdl : "";
+            cupsFreeOptions(numOptions, did);
 
-            const std::string_view model(cupsGetOption("MDL", numOptions, did));
             if (model.empty())
             {
                 return false;
             }
-            const auto modelFamily = modelFamilyMap.at(model);
+            const auto familyIt = modelFamilyMap.find(model);
+            if (familyIt == modelFamilyMap.end())
+            {
+                papplLogJob(job, PAPPL_LOGLEVEL_ERROR, "Unknown model: %s", model.c_str());
+                return false;
+            }
+            const auto modelFamily = familyIt->second;
 
             // ReSharper disable once CppDFAMemoryLeak
             const auto jobData = new types::JobData{
@@ -114,8 +122,7 @@ namespace drivers::td2000
             }
             const auto jobId = papplJobGetID(job);
 
-            types::PrintInfoFields info{};
-
+            // Determine media type from IPP media-type string
             types::MediaType mediaType{};
             const std::string_view mediaTypeStr(options->media.type);
             if (mediaTypeStr == "labels-continuous" || mediaTypeStr == "continuous")
@@ -132,19 +139,43 @@ namespace drivers::td2000
                 return false;
             }
 
+            const auto jobData = static_cast<types::JobData*>(papplJobGetData(job));
+            if (!jobData)
+            {
+                papplLogJob(job, PAPPL_LOGLEVEL_ERROR, "jobData is null");
+                return false;
+            }
+
+            // Spec §2.1 command order: AdditionalMediaInformation → PrintInformation →
+            //   VariousModeSettings → SpecifyMarginAmount → SelectCompressionMode
+
+            // 1. AdditionalMediaInformation
+            const auto mediaInfo = media::getMediaInfoForMedia(jobData->modelFamily, options->media.size_width, options->media.size_length, mediaType);
+            if (mediaInfo == media::none)
+            {
+                papplLogJob(job, PAPPL_LOGLEVEL_ERROR, "Unsupported media dimensions for model family");
+                return false;
+            }
+            const commands::AdditionalMediaInformation additionalMediaInfo{mediaInfo};
+            if (util::writeToDevice(additionalMediaInfo.get(), device, jobId) != true)
+            {
+                papplLogJob(job, PAPPL_LOGLEVEL_ERROR, "failed to send additionalMediaInfo");
+                return false;
+            }
+
+            // 2. PrintInformation
+            types::PrintInfoFields info{};
             info.mediaType = static_cast<uint8_t>(mediaType);
-            info.validFields = static_cast<uint8_t>(types::PrintInfoFlags::pi_kind) | static_cast<uint8_t>(
-                types::PrintInfoFlags::pi_width) | static_cast<uint8_t>(types::PrintInfoFlags::pi_recover) | static_cast<uint8_t>(types::PrintInfoFlags::pi_length);
-
+            info.validFields = static_cast<uint8_t>(types::PrintInfoFlags::pi_kind) |
+                               static_cast<uint8_t>(types::PrintInfoFlags::pi_width) |
+                               static_cast<uint8_t>(types::PrintInfoFlags::pi_recover) |
+                               static_cast<uint8_t>(types::PrintInfoFlags::pi_length);
             info.pageType = (pageNumber == 0) ? types::PageType::startingPage : types::PageType::otherPage;
-
-            info.mediaWidth = static_cast<uint8_t>(options->media.size_width/100);
-            info.mediaLength = static_cast<uint8_t>(options->media.size_length/100);
-
+            info.mediaWidth  = static_cast<uint8_t>(options->media.size_width  / 100);
+            info.mediaLength = static_cast<uint8_t>(options->media.size_length / 100);
             const auto rasterLineCount = options->header.cupsHeight;
-            //
             info.rasterNumber[0] = static_cast<uint8_t>(rasterLineCount);
-            info.rasterNumber[1] = static_cast<uint8_t>((rasterLineCount >> 8) & 0xFF);
+            info.rasterNumber[1] = static_cast<uint8_t>((rasterLineCount >> 8)  & 0xFF);
             info.rasterNumber[2] = static_cast<uint8_t>((rasterLineCount >> 16) & 0xFF);
             info.rasterNumber[3] = static_cast<uint8_t>((rasterLineCount >> 24) & 0xFF);
 
@@ -155,34 +186,27 @@ namespace drivers::td2000
                 return false;
             }
 
+            // 3. VariousModeSettings
             constexpr types::VariousModeSettings settings{};
             const commands::VariousModeSettings variousModeSettings{settings};
-            if (util::writeToDevice( variousModeSettings.get(), device, jobId) != true)
+            if (util::writeToDevice(variousModeSettings.get(), device, jobId) != true)
             {
                 papplLogJob(job, PAPPL_LOGLEVEL_ERROR, "failed to send variousModeSettings");
                 return false;
             }
 
-            const auto jobData = static_cast<types::JobData*>(papplJobGetData(job));
-            if (!jobData)
+            // 4. SpecifyMarginAmount — continuous tape requires a minimum feed margin;
+            //    die-cut labels must use 0 (spec §2.6)
+            const uint8_t feedMargin = (mediaType == types::MediaType::ContinuousLengthTape)
+                                       ? minFeedMarginDots.at(jobData->modelFamily) : 0;
+            const commands::SpecifyMarginAmount specifyMargin(feedMargin, 0);
+            if (util::writeToDevice(specifyMargin.get(), device, jobId) != true)
             {
-                papplLogJob(job, PAPPL_LOGLEVEL_ERROR, "jobData is null");
+                papplLogJob(job, PAPPL_LOGLEVEL_ERROR, "failed to send specifyMargin");
                 return false;
             }
 
-            const auto media = media::getMediaInfoForMedia(jobData->modelFamily, options->media.size_width, options->media.size_length, mediaType);
-            if (media == media::none)
-            {
-                papplLogJob(job, PAPPL_LOGLEVEL_ERROR, "Unsupported media dimensions for model family");
-                return false;
-            }
-            const commands::AdditionalMediaInformation additionalMediaInfo{media};
-            if (util::writeToDevice(additionalMediaInfo.get(), device, jobId) != true)
-            {
-                papplLogJob(job, PAPPL_LOGLEVEL_ERROR, "failed to send additionalMediaInfo");
-                return false;
-            }
-
+            // 5. SelectCompressionMode
             const commands::SelectCompressionMode compressionModeCommand{types::CompressionMode::NoCompression};
             if (util::writeToDevice(compressionModeCommand.get(), device, jobId) != true)
             {
@@ -516,8 +540,8 @@ namespace drivers::td2000
 
         if (driverData->num_media > 0)
         {
-            constexpr std::string_view readyMedia = "roll_current_58x0m";
-            papplCopyString(driverData->media_ready[0].size_name, readyMedia.data() , readyMedia.size());
+            constexpr std::string_view readyMedia = "roll_current_58x0mm";
+            papplCopyString(driverData->media_ready[0].size_name, readyMedia.data(), sizeof(driverData->media_ready[0].size_name));
             if (const pwg_media_t *pwg = pwgMediaForPWG(driverData->media_ready[0].size_name))
             {
                 driverData->media_ready[0].size_width  = pwg->width;
@@ -535,7 +559,7 @@ namespace drivers::td2000
                 return false;
             }
 
-            papplCopyString(driverData->media_default.size_name, defaultMedia[0] , std::string_view(defaultMedia[0]).size() + 1);
+            papplCopyString(driverData->media_default.size_name, defaultMedia[0], sizeof(driverData->media_default.size_name));
             if (const pwg_media_t *pwg = pwgMediaForPWG(driverData->media_default.size_name))
             {
                 driverData->media_default.size_width  = pwg->width;
