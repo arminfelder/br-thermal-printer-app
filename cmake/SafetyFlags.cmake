@@ -207,6 +207,10 @@ if (ENABLE_SANITIZERS)
     )
     add_compile_options(${SANITIZER_FLAGS})
     add_link_options(${SANITIZER_LINK_FLAGS})
+else ()
+    if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+        add_compile_options(-O0)
+    endif ()
 endif ()
 
 # ---------------------------------------------------------------------------
@@ -215,6 +219,3 @@ endif ()
 if (NOT ENABLE_SANITIZERS)
     add_compile_options(-O2)
 endif ()
-
-
-add_compile_options(-O0)
