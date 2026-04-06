@@ -21,6 +21,7 @@
 #define BR_THERMAL_TD2000_H
 #include <array>
 #include <map>
+#include <mutex>
 #include <set>
 #include <string>
 #include <type_traits>
@@ -602,6 +603,7 @@ namespace drivers::td2000
             {
                 std::vector<uint8_t> data;
                 data.reserve(print_with_feeding.size());
+                data.insert(data.end(), print_with_feeding.begin(), print_with_feeding.end());
                 return data;
             }
 
@@ -670,14 +672,12 @@ namespace drivers::td2000
 
 #undef DEFINE_MEDIA_INFO
 
-        bool startJob(pappl_job_t *job, pappl_pr_options_t *options, pappl_device_t *device);
-        bool startPage(pappl_job_t *job, pappl_pr_options_t *options, pappl_device_t *device, unsigned pageNumber);
-        bool writeLine(pappl_job_t *job, pappl_pr_options_t *options, pappl_device_t *device, unsigned pageNumber, const unsigned char *pixels);
-        bool getStatus(pappl_printer_t *printer);
     }
 
     namespace callbacks
     {
+        void applyPrinterStatus(pappl_printer_t *printer, const types::PrinterInfo &info, const char *uri);
+        bool waitForPrinterResume(pappl_job_t *job, pappl_device_t *device, pappl_printer_t *printer, const char *uri);
         bool print(pappl_job_t *job, pappl_pr_options_t *options, pappl_device_t *device);
         bool startJob(pappl_job_t *job, pappl_pr_options_t *options, pappl_device_t *device);
         bool startPage(pappl_job_t *job, pappl_pr_options_t *options, pappl_device_t *device, unsigned pageNumber);
@@ -759,7 +759,10 @@ namespace drivers::td2000
     };
     
     static std::map<std::string, types::PrinterInfo> printerStatus{};
+    // true while a print job is active: printer pushes status automatically,
+    // so getStatus must not send ESC i S (spec §4, ESC i S note).
     static std::map<std::string, bool> printerStatusPolling{};
+    static std::mutex printerStateMutex{};
 
 }
 
