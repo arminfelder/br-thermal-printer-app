@@ -18,12 +18,149 @@
 //
 
 #include <catch2/catch_test_macros.hpp>
+#include <cstring>
 
 #include "td2000.h"
 
 using namespace drivers::td2000;
 using namespace drivers::td2000::media;
 using namespace drivers::td2000::types;
+
+// ---------------------------------------------------------------------------
+// MediaInfoFields parsing tests
+// ---------------------------------------------------------------------------
+
+TEST_CASE("MediaInfoFields - parse continuous tape blob (57mm)", "[media][MediaInfoFields]") {
+    const auto fields = td2x2x::_57mm.fields();
+
+    SECTION("sensorId") { REQUIRE(fields.sensorId == 63); }
+    SECTION("energyRank") { REQUIRE(fields.energyRank == 4); }
+    SECTION("paperWidth is 57mm") { REQUIRE(fields.paperWidth == 57); }
+    SECTION("paperLengthMm is 0 for continuous tape") { REQUIRE(fields.paperLengthMm == 0); }
+    SECTION("headDivide") { REQUIRE(fields.headDivide == 0); }
+    SECTION("rollWidMm") { REQUIRE(fields.rollWidMm == 57); }
+    SECTION("pinOffsetLeft") { REQUIRE(fields.pinOffsetLeft == 8); }
+    SECTION("imageAreaWidthRes") { REQUIRE(fields.imageAreaWidthRes == 432); }
+    SECTION("imageAreaLengthRes is 0 for continuous tape") { REQUIRE(fields.imageAreaLengthRes == 0); }
+    SECTION("paperSize") { REQUIRE(fields.paperSize == 0x01B6); }
+    SECTION("sizeMM string") { REQUIRE(std::string(fields.sizeMM) == "RD 57mm"); }
+    SECTION("sizeIN string") { REQUIRE(std::string(fields.sizeIN) == "2.25\""); }
+    SECTION("lblPitchDot is 0 for continuous tape") { REQUIRE(fields.lblPitchDot == 0); }
+    SECTION("reserved_12_[6] == 0 marks continuous tape") { REQUIRE(fields.reserved_12_[6] == 0); }
+}
+
+TEST_CASE("MediaInfoFields - parse die-cut label blob (40x40mm)", "[media][MediaInfoFields]") {
+    const auto fields = td2x2x::_40x40mm.fields();
+
+    SECTION("sensorId") { REQUIRE(fields.sensorId == 63); }
+    SECTION("energyRank") { REQUIRE(fields.energyRank == 5); }
+    SECTION("paperWidth is 40mm") { REQUIRE(fields.paperWidth == 40); }
+    SECTION("paperLengthMm is 40mm for die-cut") { REQUIRE(fields.paperLengthMm == 40); }
+    SECTION("rollWidMm") { REQUIRE(fields.rollWidMm == 44); }
+    SECTION("pinOffsetLeft") { REQUIRE(fields.pinOffsetLeft == 76); }
+    SECTION("imageAreaWidthRes") { REQUIRE(fields.imageAreaWidthRes == 296); }
+    SECTION("imageAreaLengthRes") { REQUIRE(fields.imageAreaLengthRes == 272); }
+    SECTION("sizeMM string") { REQUIRE(std::string(fields.sizeMM) == "40mm x 40mm"); }
+    SECTION("sizeIN string") { REQUIRE(std::string(fields.sizeIN) == "1.5\" x 1.5\""); }
+    SECTION("lblPitchDot is non-zero for die-cut") { REQUIRE(fields.lblPitchDot == 348); }
+    SECTION("reserved_12_[6] == 1 marks die-cut label") { REQUIRE(fields.reserved_12_[6] == 1); }
+}
+
+// ---------------------------------------------------------------------------
+// MediaInfo set_fields / round-trip tests
+// ---------------------------------------------------------------------------
+
+TEST_CASE("MediaInfo - set_fields round-trip", "[media][MediaInfo]") {
+    MediaInfoFields original{};
+    original.sensorId           = 63;
+    original.energyRank         = 4;
+    original.paperWidth         = 57;
+    original.paperLengthMm      = 0;
+    original.headDivide         = 0;
+    original.rollWidMm          = 57;
+    original.pinOffsetLeft      = 8;
+    original.imageAreaWidthRes  = 432;
+    original.imageAreaLengthRes = 0;
+    original.paperSize          = 0x01B6;
+    original.lblPitchDot        = 0;
+
+    types::MediaInfo info{};
+    info.set_fields(original);
+    const auto parsed = info.fields();
+
+    SECTION("sensorId survives round-trip") { REQUIRE(parsed.sensorId == original.sensorId); }
+    SECTION("paperWidth survives round-trip") { REQUIRE(parsed.paperWidth == original.paperWidth); }
+    SECTION("paperLengthMm survives round-trip") { REQUIRE(parsed.paperLengthMm == original.paperLengthMm); }
+    SECTION("pinOffsetLeft survives round-trip") { REQUIRE(parsed.pinOffsetLeft == original.pinOffsetLeft); }
+    SECTION("imageAreaWidthRes survives round-trip") { REQUIRE(parsed.imageAreaWidthRes == original.imageAreaWidthRes); }
+    SECTION("paperSize survives round-trip") { REQUIRE(parsed.paperSize == original.paperSize); }
+    SECTION("lblPitchDot survives round-trip") { REQUIRE(parsed.lblPitchDot == original.lblPitchDot); }
+}
+
+TEST_CASE("MediaInfo - set_fields writes correct raw bytes", "[media][MediaInfo]") {
+    MediaInfoFields fields{};
+    fields.paperWidth  = 40;
+    fields.pinOffsetLeft = 76;
+    fields.imageAreaWidthRes = 296;   // 0x0128 LE → 0x28, 0x01
+
+    types::MediaInfo info{};
+    info.set_fields(fields);
+
+    SECTION("paperWidth at byte 2") { REQUIRE(info.raw[2] == 40); }
+    SECTION("pinOffsetLeft at byte 6") { REQUIRE(info.raw[6] == 76); }
+    SECTION("imageAreaWidthRes low byte at 8") { REQUIRE(info.raw[8] == 0x28); }
+    SECTION("imageAreaWidthRes high byte at 9") { REQUIRE(info.raw[9] == 0x01); }
+}
+
+TEST_CASE("MediaInfo - two blobs with different reserved_12_[6] compare unequal", "[media][MediaInfo]") {
+    const auto continuous = td2x2x::_57mm;
+    const auto diecut     = td2x2x::_40x40mm;
+
+    REQUIRE_FALSE(continuous == diecut);
+    REQUIRE(continuous.fields().reserved_12_[6] == 0);
+    REQUIRE(diecut.fields().reserved_12_[6] == 1);
+}
+
+// ---------------------------------------------------------------------------
+// AdditionalMediaInformation command tests
+// ---------------------------------------------------------------------------
+
+TEST_CASE("AdditionalMediaInformation - command structure", "[media][commands]") {
+    // ESC i U: 1Bh 69h 55h 77h 01h + 127-byte payload
+    const auto result = commands::AdditionalMediaInformation(td2x2x::_57mm).get();
+
+    SECTION("total size is 132 bytes (5 header + 127 payload)") {
+        REQUIRE(result.size() == 132);
+    }
+
+    SECTION("header byte 0: ESC (0x1B)") { REQUIRE(result[0] == 0x1B); }
+    SECTION("header byte 1: i   (0x69)") { REQUIRE(result[1] == 0x69); }
+    SECTION("header byte 2: U   (0x55)") { REQUIRE(result[2] == 0x55); }
+    SECTION("header byte 3: length (0x77)") { REQUIRE(result[3] == 0x77); }
+    SECTION("header byte 4: count (0x01)") { REQUIRE(result[4] == 0x01); }
+
+    SECTION("payload matches raw blob bytes") {
+        const auto& raw = td2x2x::_57mm.raw;
+        for (size_t i = 0; i < raw.size(); ++i) {
+            REQUIRE(result[5 + i] == raw[i]);
+        }
+    }
+}
+
+TEST_CASE("AdditionalMediaInformation - different media produces different payload", "[media][commands]") {
+    const auto result57  = commands::AdditionalMediaInformation(td2x2x::_57mm).get();
+    const auto result58  = commands::AdditionalMediaInformation(td2x2x::_58mm).get();
+
+    REQUIRE(result57 != result58);
+    // Header must be identical
+    for (size_t i = 0; i < 5; ++i) {
+        REQUIRE(result57[i] == result58[i]);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// getMediaInfoForMedia tests
+// ---------------------------------------------------------------------------
 
 TEST_CASE("getMediaInfoForMedia - ContinuousLengthTape", "[media]") {
 

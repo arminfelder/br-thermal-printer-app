@@ -252,35 +252,43 @@ namespace drivers::td2000
 
         using PrinterInfo = PackedProtocolBlock<PrinterInfoFields, 32>;
 
+        // 127-byte media blob payload of ESC i U (1Bh 69h 55h 77h 01h).
+        // Field names are derived from PTD source files (e.g. bst202ed.txt).
         struct __attribute__((packed)) MediaInfoFields {
-            uint8_t  sensorId;
-            uint8_t  energyRank;
-            uint8_t  paperWidth;
-            uint8_t  rollLenMm;
-            uint8_t  unknown4;
-            uint8_t  rollWidMm;
-            int8_t   pinOffsetLeft;
-            uint8_t  unknown8;
-            uint16_t imageAreaWidthRes;
-            uint16_t imageAreaLengthRes;
-            uint8_t  unknown5[3];
-            uint8_t  virtualOffsetX;
-            uint8_t  unknown10;
-            uint8_t  virtualOffsetY;
-            uint8_t  unknown12;
-            uint8_t  afterFeedPlus;
-            uint8_t  unknown11[1];
-            uint16_t paperSize;
-            uint8_t  unknown7[54];
-            char     sizeMM[16];
-            char     sizeIN[16];
-            uint8_t  unknown6[2];
-            uint16_t lblPitchDot;
-            uint8_t  unknown14[2];
+            uint8_t  sensorId;              // [0]    PTD: nSensorID (63 for TD-2000 series)
+            uint8_t  energyRank;            // [1]    PTD: byEnergyRank
+            uint8_t  paperWidth;            // [2]    PTD: nPaperWidth/10 (mm)
+            uint8_t  paperLengthMm;         // [3]    PTD: nPaperLength/10 (mm); 0 for continuous tape
+            uint8_t  headDivide;            // [4]    PTD: byHeadDivide (always 0)
+            uint8_t  rollWidMm;             // [5]    PTD: byRollWidMm
+            uint8_t  pinOffsetLeft;         // [6]    PTD: wPinOffsetLeft (0–116; unsigned)
+            uint8_t  reserved0;             // [7]    reserved (always 0)
+            uint16_t imageAreaWidthRes;     // [8-9]  PTD: nImageAreaWidthRes, little-endian (dots)
+            uint16_t imageAreaLengthRes;    // [10-11] PTD: nImageAreaLengthRes, little-endian (dots); 0 for continuous
+            uint8_t  dieStartPlus;          // [12]   PTD: nDieStartPlus (always 0)
+            uint8_t  dieStartRev;           // [13]   PTD: nDieStartRev (always 0)
+            uint8_t  dieStartFwd;           // [14]   PTD: nDieStartFwd (always 0)
+            uint8_t  virtualOffsetX;        // [15]   PTD: nVirtualOffsetX (dots)
+            uint8_t  reserved1;             // [16]   reserved (always 0)
+            uint8_t  virtualOffsetY;        // [17]   PTD: nVirtualOffsetY (dots)
+            uint8_t  reserved2;             // [18]   reserved (always 0)
+            uint8_t  afterFeedPlus;         // [19]   PTD: nAfterFeedPlus (dots)
+            uint8_t  reserved3;             // [20]   reserved (always 0)
+            uint16_t paperSize;             // [21-22] PTD: wPafMediaID / nPaperSize, little-endian
+            // [23-76] PTD capability fields not serialised into the blob (always 0):
+            //   dwPaperAbility01 (4 bytes), byReserved001[16], nCompatiblePaperSizes[4], etc.
+            uint8_t  reserved4[54];
+            char     sizeMM[16];            // [77-92]  PTD: szSizeMM (null-terminated ASCII, e.g. "62 x 29 mm")
+            char     sizeIN[16];            // [93-108] PTD: szSizeIN (null-terminated ASCII, e.g. "2.44\" x 1.14\"")
+            uint8_t  reserved5[2];          // [109-110] reserved (always 0)
+            uint16_t lblPitchDot;           // [111-112] PTD: lblPitchDot, little-endian; 0 for continuous tape
+            uint8_t  reserved6[2];          // [113-114] reserved (always 0)
+            // [115-123] PTD: reserved_12_[0..8] (first 9 of 12 values).
+            // Byte [6] of this array (blob[121]): 0=continuous tape, 1=die-cut label.
             uint8_t  reserved_12_[9];
-            int8_t   detectionSensitivity;
-            int8_t   luminesenceSensitivity;
-            uint8_t  unknown13;
+            int8_t   detectionSensitivity;  // [124] PTD: markNoChkValu (always 0)
+            int8_t   luminesenceSensitivity;// [125] always 0
+            uint8_t  reserved7;             // [126] reserved (always 0)
         };
         static_assert(sizeof(MediaInfoFields) == 127, "MediaInfo must match protocol size (127 bytes)");
         static_assert(std::is_trivially_copyable_v<MediaInfoFields>);
@@ -755,7 +763,7 @@ namespace drivers::td2000
     const std::string driverName { "brother_td_2000"};
     const std::string driverInfo {"Brother TD-2020/2120N/2130N/2030A/2125N/2125NWB/2135N/2135NWB"};
     const std::set<std::string_view> supportedPrinters {
-        "TD-2020","TD-2120N","TD-2130N","TD-2030A","TD-2125N","TD-2125NW","TD-2135N","TD-2135NW"
+        "TD-2020","TD-2120N","TD-2130N","TD-2030A","TD-2125N","TD-2125NWB","TD-2135N","TD-2135NWB"
     };
     
     static std::map<std::string, types::PrinterInfo> printerStatus{};
