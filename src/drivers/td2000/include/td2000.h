@@ -739,25 +739,33 @@ namespace drivers::td2000
         {types::ModelFamily::Td2x3x, 35},  // 300 dpi
     };
 
-    constexpr std::array<const char*,13> defaultMedia{
+    constexpr std::array<const char*,12> defaultMedia{
+        // Named roll sizes (non-zero length → visible in print dialogs)
         "roll_default_58x100mm",
-        "roll_current_58x0mm",
-        "roll_min_57x10mm",
-        "roll_max_58x100000mm",
-        "custom_min_57x10mm",
-        "custom_max_58x100000mm",
-        "labels_bde_51x26mm",
-        "labels_bde_30x20mm",
-        "labels_bde_40x40mm",
-        "labels_bde_40x50mm",
-        "labels_bde_40x60mm",
-        "labels_bde_50x30mm",
-        "labels_bde_60x60mm",
+        // Size range for continuous roll media (consumed by PAPPL for media-col-database range,
+        // not emitted as individual named sizes).
+        // Spec §2.3.4: min length 12 mm, max length 1000 mm.
+        "roll_min_57x12mm",
+        "roll_max_58x1000mm",
+        "custom_min_57x12mm",
+        "custom_max_58x1000mm",
+        // Die-cut label sizes.  Must use a valid PWG mm-class ("om" = Other Metric);
+        // "labels" is not a valid class and causes pwgMediaForPWG() to return NULL,
+        // making the entry invisible in media-col-database.
+        // Sizes per spec §2.3.2 (b) Die-cut labels, IDs 422/431/432/433/434/435/437.
+        "om_51x26mm_51x26mm",
+        "om_30x30mm_30x30mm",
+        "om_40x40mm_40x40mm",
+        "om_40x50mm_40x50mm",
+        "om_40x60mm_40x60mm",
+        "om_50x30mm_50x30mm",
+        "om_60x60mm_60x60mm",
     };
 
-    constexpr std::array<const char*,2> mediaTypes{
-        "continuous",
-        "labels-continuous"
+    constexpr std::array<const char*,3> mediaTypes{
+        "continuous",       // continuous roll tape   → MediaType::ContinuousLengthTape
+        "labels",           // pre-cut die-cut labels → MediaType::DieCutLabels
+        "labels-continuous" // continuous label stock → MediaType::ContinuousLengthTape
     };
 
     const std::string driverName { "brother_td_2000"};

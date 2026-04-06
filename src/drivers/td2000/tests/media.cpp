@@ -18,7 +18,13 @@
 //
 
 #include <catch2/catch_test_macros.hpp>
+#include <algorithm>
 #include <cstring>
+#include <string_view>
+
+extern "C" {
+#include <cups/cups.h>
+}
 
 #include "td2000.h"
 
@@ -322,5 +328,80 @@ TEST_CASE("getMediaInfoForMedia - Boundary conditions", "[media][boundary]") {
 
         REQUIRE(at_boundary == td2x2x::_40x40mm);
         REQUIRE(above_boundary == td2x2x::_40x50mm);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// defaultMedia and mediaTypes configuration tests
+// ---------------------------------------------------------------------------
+
+// PAPPL's validate_driver() calls pwgMediaForPWG() on every entry in
+// driverData->media and returns false (→ EINVAL → printer creation fails) for
+// any entry that resolves to NULL.
+TEST_CASE("defaultMedia - all entries resolve via pwgMediaForPWG", "[config]") {
+    for (const char *name : defaultMedia) {
+        CAPTURE(name);
+        REQUIRE(pwgMediaForPWG(name) != nullptr);
+    }
+}
+
+// PAPPL's validate_ready() rejects media whose size_length < min_length
+// computed from the media list.  Any non-range entry with length=0 would be
+// filtered by Kate/Qt (y-dimension=0 hides the size in the print dialog).
+TEST_CASE("defaultMedia - individual (non-range) entries have non-zero dimensions", "[config]") {
+    // The range-defining entries are consumed by PAPPL to build media-col-database
+    // range entries and are never emitted as individual named media sizes.
+    auto isRangeName = [](std::string_view n) {
+        return n.starts_with("roll_min_")   || n.starts_with("roll_max_") ||
+               n.starts_with("custom_min_") || n.starts_with("custom_max_");
+    };
+
+    for (const char *name : defaultMedia) {
+        if (isRangeName(name))
+            continue;
+        CAPTURE(name);
+        const pwg_media_t *pwg = pwgMediaForPWG(name);
+        REQUIRE(pwg != nullptr);
+        REQUIRE(pwg->width  > 0);
+        REQUIRE(pwg->length > 0);
+    }
+}
+
+// defaultMedia[0] is used for both media_ready and media_default.
+// Its dimensions must be within the [roll_min, roll_max] range or
+// papplPrinterSetDriverData / validate_ready will reject the printer.
+TEST_CASE("defaultMedia - first entry is suitable for media_ready", "[config]") {
+    const pwg_media_t *ready = pwgMediaForPWG(defaultMedia[0]);
+    REQUIRE(ready != nullptr);
+
+    const pwg_media_t *minPwg = pwgMediaForPWG("roll_min_57x12mm");
+    const pwg_media_t *maxPwg = pwgMediaForPWG("roll_max_58x1000mm");
+    REQUIRE(minPwg != nullptr);
+    REQUIRE(maxPwg != nullptr);
+
+    REQUIRE(ready->width  >= minPwg->width);
+    REQUIRE(ready->width  <= maxPwg->width);
+    REQUIRE(ready->length >= minPwg->length);
+    REQUIRE(ready->length <= maxPwg->length);
+}
+
+// startPage() maps media-type strings to MediaType enum values.
+// All three variants must be present so the printer correctly handles both
+// continuous tape and die-cut label jobs.
+TEST_CASE("mediaTypes - required type strings are present", "[config]") {
+    auto has = [](std::string_view needle) {
+        return std::ranges::any_of(mediaTypes, [&](const char *t) {
+            return std::string_view(t) == needle;
+        });
+    };
+
+    SECTION("'continuous' is present (ContinuousLengthTape)") {
+        REQUIRE(has("continuous"));
+    }
+    SECTION("'labels' is present (DieCutLabels)") {
+        REQUIRE(has("labels"));
+    }
+    SECTION("'labels-continuous' is present (ContinuousLengthTape)") {
+        REQUIRE(has("labels-continuous"));
     }
 }

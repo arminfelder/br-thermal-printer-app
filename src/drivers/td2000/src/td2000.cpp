@@ -733,8 +733,12 @@ namespace drivers::td2000
 
         if (driverData->num_media > 0)
         {
-            constexpr std::string_view readyMedia = "roll_current_58x0mm";
-            papplCopyString(driverData->media_ready[0].size_name, readyMedia.data(), sizeof(driverData->media_ready[0].size_name));
+            // Use the first named media entry as the ready media.  Its dimensions
+            // must fall within the [roll_min, roll_max] range checked by
+            // papplPrinterSetDriverData / validate_ready — a zero-length entry
+            // (roll_current_58x0mm) would fail that range check even though
+            // length-dim = 0 is valid per PWG 5101.1 §5.1.3.
+            papplCopyString(driverData->media_ready[0].size_name, defaultMedia[0], sizeof(driverData->media_ready[0].size_name));
             if (const pwg_media_t *pwg = pwgMediaForPWG(driverData->media_ready[0].size_name))
             {
                 driverData->media_ready[0].size_width  = pwg->width;
@@ -762,9 +766,6 @@ namespace drivers::td2000
                 driverData->media_default.right_margin  = margins.at(family).right;
                 driverData->media_default.top_margin    = margins.at(family).top;
                 papplCopyString(driverData->media_default.type, driverData->type[0], sizeof(driverData->media_default.type));
-
-                papplCopyString(driverData->media_ready[0].source, driverData->source[0], sizeof(driverData->media_ready[0].source));
-                papplCopyString(driverData->media_ready[0].type,   driverData->type[0],   sizeof(driverData->media_ready[0].type));
             }
             else
             {
