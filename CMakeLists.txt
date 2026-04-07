@@ -49,6 +49,11 @@ include(${CMAKE_SOURCE_DIR}/cmake/PapplCups.cmake)
 pappl_cups_setup()
 
 # ==============================================================================
+# Install Paths
+# ==============================================================================
+include(GNUInstallDirs)
+
+# ==============================================================================
 # Build Configuration
 # ==============================================================================
 include_directories(include)
@@ -60,6 +65,13 @@ add_subdirectory(src)
 
 if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     add_subdirectory(apps)
+    install(FILES dist/br-thermal.service
+            DESTINATION lib/systemd/system)
+    install(FILES dist/br-thermal.default
+            DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/default
+            RENAME br-thermal)
+    install(FILES dist/60-br-thermal.rules
+            DESTINATION lib/udev/rules.d)
 endif ()
 
 # ==============================================================================

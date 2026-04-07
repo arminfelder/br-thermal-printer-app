@@ -1,0 +1,29 @@
+Source: br-thermal
+Section: text
+Priority: optional
+Maintainer: Armin Felder <armin.felder@gmail.com>
+Build-Depends:
+ debhelper-compat (= 13),
+ cmake (>= 3.31),
+ pkg-config,
+ libpappl-dev,
+ libcups2-dev,
+ libssl-dev,
+ libavahi-client-dev,
+ libusb-1.0-0-dev,
+Standards-Version: 4.7.4
+Homepage: https://github.com/arminfelder/br-thermal-printer-app
+Rules-Requires-Root: no
+
+Package: br-thermal
+Section: text
+Priority: optional
+Architecture: any
+Depends:
+ ${shlibs:Depends},
+ ${misc:Depends},
+ adduser,
+ cups
+Description: Brother thermal printer driver
+ A CUPS/IPP printer driver for Brother thermal label printers.
+ Implements the raster printing protocol via the PAPPL library

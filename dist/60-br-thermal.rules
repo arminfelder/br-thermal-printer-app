@@ -1,0 +1,9 @@
+# Brother thermal label printer USB access for br-thermal service
+SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="2055", GROUP="_br-thermal", MODE="0660", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="2057", GROUP="_br-thermal", MODE="0660", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="2058", GROUP="_br-thermal", MODE="0660", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="20f6", GROUP="_br-thermal", MODE="0660", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="20f7", GROUP="_br-thermal", MODE="0660", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="20f8", GROUP="_br-thermal", MODE="0660", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="20f9", GROUP="_br-thermal", MODE="0660", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="20fa", GROUP="_br-thermal", MODE="0660", TAG+="uaccess"

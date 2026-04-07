@@ -1,0 +1,7 @@
+# Configuration for br-thermal
+# This file is sourced by the systemd service.
+# Editing this file survives package upgrades.
+
+# Address the IPP server listens on.
+# Use "localhost" to restrict to loopback, or a hostname/IP to expose on the network.
+SERVER_NAME=localhost

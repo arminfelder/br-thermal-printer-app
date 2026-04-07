@@ -1,0 +1,28 @@
+[Unit]
+Description=Brother Thermal Printer Driver
+Documentation=https://github.com/arminfelder/br-thermal-printer-app
+After=network.target
+
+[Service]
+Type=exec
+EnvironmentFile=-/etc/default/br-thermal
+StandardOutput=journal
+StandardError=journal
+ExecStart=/usr/sbin/br-thermal server \
+    -o log-file=- \
+    -o server-name=${SERVER_NAME} \
+    -o server-options=no-tls
+Restart=on-failure
+RestartSec=5
+
+User=_br-thermal
+Group=_br-thermal
+SupplementaryGroups=lp
+
+RuntimeDirectory=br-thermal
+StateDirectory=br-thermal
+LogsDirectory=br-thermal
+
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,17 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    purge)
+        if getent passwd _br-thermal > /dev/null 2>&1; then
+            deluser --remove-home _br-thermal || true
+        fi
+        if getent group _br-thermal > /dev/null 2>&1; then
+            delgroup _br-thermal || true
+        fi
+    ;;
+esac
+
+#DEBHELPER#
+
+exit 0
