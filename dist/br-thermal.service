@@ -10,8 +10,10 @@ StandardOutput=journal
 StandardError=journal
 ExecStart=/usr/sbin/br-thermal server \
     -o log-file=- \
-    -o listen-hostname=${SERVER_NAME} \
+    -o listen-hostname=${LISTEN_HOSTNAME} \
+    -o server-name=${LISTEN_HOSTNAME} \
     -o log-level=${LOG_LEVEL} \
+    -o spool-directory=/var/lib/br-thermal \
     -o server-options=no-tls
 Restart=on-failure
 RestartSec=5
@@ -24,6 +26,71 @@ RuntimeDirectory=br-thermal
 StateDirectory=br-thermal
 LogsDirectory=br-thermal
 
+# ---------------------------------------------------------------------------
+# Filesystem
+# ---------------------------------------------------------------------------
+ProtectSystem=strict
+ProtectHome=true
+# /tmp is needed for the PAPPL IPC socket (/tmp/br-thermal<port>.sock)
+ReadWritePaths=/tmp /var/lib/br-thermal
+PrivateTmp=false
+
+# ---------------------------------------------------------------------------
+# Devices
+# ---------------------------------------------------------------------------
+# Do not use PrivateDevices — it hides USB device nodes.
+# Access is controlled by the udev rule (60-br-thermal.rules).
+
+# ---------------------------------------------------------------------------
+# Kernel and system
+# ---------------------------------------------------------------------------
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+
+# ---------------------------------------------------------------------------
+# Process isolation
+# ---------------------------------------------------------------------------
+NoNewPrivileges=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+PrivateUsers=false
+UMask=0077
+
+# ---------------------------------------------------------------------------
+# Process visibility
+# ---------------------------------------------------------------------------
+ProtectProc=invisible
+ProcSubset=pid
+
+# ---------------------------------------------------------------------------
+# Capabilities
+# ---------------------------------------------------------------------------
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+# ---------------------------------------------------------------------------
+# Memory
+# ---------------------------------------------------------------------------
+MemoryDenyWriteExecute=true
+
+# ---------------------------------------------------------------------------
+# System calls
+# ---------------------------------------------------------------------------
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+
+# ---------------------------------------------------------------------------
+# Network
+# ---------------------------------------------------------------------------
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+IPAddressDeny=any
+IPAddressAllow=localhost
 
 [Install]
 WantedBy=multi-user.target
