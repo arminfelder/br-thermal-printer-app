@@ -5,3 +5,6 @@
 # Address the IPP server listens on.
 # Use "localhost" to restrict to loopback, or a hostname/IP to expose on the network.
 SERVER_NAME=localhost
+
+# Log level: fatal, error, warn, info, debug
+LOG_LEVEL=info

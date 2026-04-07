@@ -10,6 +10,7 @@ StandardOutput=journal
 StandardError=journal
 ExecStart=/usr/sbin/br-thermal server \
     -o log-file=- \
+    -o log-level=${LOG_LEVEL} \
     -o server-name=${SERVER_NAME} \
     -o server-options=no-tls
 Restart=on-failure
