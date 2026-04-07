@@ -1,0 +1,15 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    remove|upgrade|deconfigure)
+        if [ -d /run/systemd/system ]; then
+            systemctl stop br-thermal.service || true
+            systemctl disable br-thermal.service || true
+        fi
+    ;;
+esac
+
+#DEBHELPER#
+
+exit 0

@@ -15,4 +15,8 @@
 
 add_executable(server main.cpp)
 
+set_target_properties(server PROPERTIES OUTPUT_NAME br-thermal)
+
 target_link_libraries(server PRIVATE br_thermal)
+
+install(TARGETS server DESTINATION sbin)
