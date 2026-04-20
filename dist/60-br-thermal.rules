@@ -1,9 +1,22 @@
-# Brother thermal label printer USB access for br-thermal service
-SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="2055", GROUP="_br-thermal", MODE="0660", TAG+="uaccess"
-SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="2057", GROUP="_br-thermal", MODE="0660", TAG+="uaccess"
-SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="2058", GROUP="_br-thermal", MODE="0660", TAG+="uaccess"
-SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="20f6", GROUP="_br-thermal", MODE="0660", TAG+="uaccess"
-SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="20f7", GROUP="_br-thermal", MODE="0660", TAG+="uaccess"
-SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="20f8", GROUP="_br-thermal", MODE="0660", TAG+="uaccess"
-SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="20f9", GROUP="_br-thermal", MODE="0660", TAG+="uaccess"
-SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="20fa", GROUP="_br-thermal", MODE="0660", TAG+="uaccess"
+# Brother thermal label printer USB access for the br-thermal service.
+#
+# Grants the _br-thermal system user read/write access to supported devices
+# and tags them with uaccess so the logged-in desktop user can also access them.
+#
+# Reload after changes:
+#   udevadm control --reload-rules && udevadm trigger --subsystem-match=usb
+
+# TD-2000 series (label printers) — vendor 04F9
+SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="2055", GROUP="_br-thermal", MODE="0660", TAG+="uaccess"  # TD-2020
+SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="2057", GROUP="_br-thermal", MODE="0660", TAG+="uaccess"  # TD-2120N
+SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="2058", GROUP="_br-thermal", MODE="0660", TAG+="uaccess"  # TD-2130N
+SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="20f6", GROUP="_br-thermal", MODE="0660", TAG+="uaccess"  # TD-2030A
+SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="20f7", GROUP="_br-thermal", MODE="0660", TAG+="uaccess"  # TD-2125N
+SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="20f8", GROUP="_br-thermal", MODE="0660", TAG+="uaccess"  # TD-2125NWB
+SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="20f9", GROUP="_br-thermal", MODE="0660", TAG+="uaccess"  # TD-2135N
+SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="20fa", GROUP="_br-thermal", MODE="0660", TAG+="uaccess"  # TD-2135NWB
+
+# PT series (tape printers) — vendor 04F9
+SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="2060", GROUP="_br-thermal", MODE="0660", TAG+="uaccess"  # PT-E550W
+SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="2062", GROUP="_br-thermal", MODE="0660", TAG+="uaccess"  # PT-P750W
+SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="2064", GROUP="_br-thermal", MODE="0660", TAG+="uaccess"  # PT-P710BT
