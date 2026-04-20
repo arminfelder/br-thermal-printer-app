@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "td2000.h"
+#include "pte550w.h"
 
 extern "C" {
 #include <pappl/pappl.h>
@@ -30,6 +31,12 @@ const std::map<std::string_view,std::string>driverMapping{
                     "TD-2135N",drivers::td2000::driverName
                 },{
                     "TD-2135NW",drivers::td2000::driverName
+                },{
+                    "PT-E550W", drivers::pte550w::driverName
+                },{
+                    "PT-P750W", drivers::pte550w::driverName
+                },{
+                    "PT-P710BT",drivers::pte550w::driverName
                 }
 };
 
@@ -46,7 +53,8 @@ class BrThermal
         std::string footer{"br-thermal"};
 
         std::vector<pappl_pr_driver_t> drivers{
-            {drivers::td2000::driverName.c_str(), drivers::td2000::driverInfo.c_str() ,nullptr ,nullptr},
+            {drivers::td2000::driverName.c_str(), drivers::td2000::driverInfo.c_str(), nullptr, nullptr},
+            {drivers::pte550w::driverName.c_str(), drivers::pte550w::driverInfo.c_str(), nullptr, nullptr},
         };
 };
 

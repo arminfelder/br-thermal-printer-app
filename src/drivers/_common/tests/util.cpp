@@ -32,18 +32,7 @@ TEST_CASE("TIFF PackBits" )
         0xED, 0x00, 0xFF, 0x22, 0x05, 0x23, 0xBA, 0xBF, 0xA2, 0x22, 0x2B
     };
 
-    bool missmatch = false;
-    for (auto i = 0; i < result.size(); i++)
-    {
-        const auto actual = result[i];
-        const auto wanted = expected[i];
-        if (actual != wanted)
-        {
-            missmatch = true;
-        }
-    }
-
-    REQUIRE(!missmatch);
+    REQUIRE(result == expected);
 }
 TEST_CASE("reverseBitOrder - boundary values", "[reverseBitOrder]")
 {
@@ -103,7 +92,7 @@ TEST_CASE("reverseBitOrder - double reverse is identity", "[reverseBitOrder]")
 
 TEST_CASE("mirrorLine - empty input", "[mirrorLine]")
 {
-    constexpr std::vector<uint8_t> data{};
+    const std::vector<uint8_t> data{};
     const auto result = mirrorLine(data);
     REQUIRE(result.empty());
 }

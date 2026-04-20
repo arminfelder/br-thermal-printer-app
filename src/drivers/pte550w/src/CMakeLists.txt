@@ -13,7 +13,21 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-add_subdirectory(_common)
+add_library(pte550w)
 
-add_subdirectory(td2000)
-add_subdirectory(pte550w)
+add_library(drivers::pte550w ALIAS pte550w)
+
+target_sources(pte550w
+        PRIVATE
+        pte550w.cpp
+)
+
+target_link_libraries(pte550w PUBLIC PAPPL::pappl CUPS::cups drivers::utils)
+
+target_compile_features(pte550w PUBLIC cxx_std_23)
+
+target_include_directories(pte550w
+        PUBLIC
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+)

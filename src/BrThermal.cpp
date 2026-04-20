@@ -73,6 +73,10 @@ bool BrThermal::driver_cb([[maybe_unused]] pappl_system_t* system, [[maybe_unuse
         {
             return drivers::td2000::updateDriverData(driver_data, model);
         }
+        if (std::string_view(driver_name) == "brother_pte550w_p750w_p710bt")
+        {
+            return drivers::pte550w::updateDriverData(driver_data, model);
+        }
     return false;
 }
 
