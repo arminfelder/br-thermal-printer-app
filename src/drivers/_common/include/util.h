@@ -70,7 +70,7 @@ namespace util
         return true;
     }
     
-    constexpr uint8_t reverseBitOrder(const uint8_t value);
+    uint8_t reverseBitOrder(uint8_t value);
     std::vector<uint8_t> mirrorLine(const std::span<const uint8_t> &data);
     std::vector<uint8_t> compressLine(const std::vector<unsigned char>& data);
 }

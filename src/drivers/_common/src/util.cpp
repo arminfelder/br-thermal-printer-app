@@ -31,7 +31,7 @@ extern "C" {
 
 namespace util
 {
-    constexpr uint8_t reverseBitOrder(const uint8_t value)
+    uint8_t reverseBitOrder(const uint8_t value)
     {
        return static_cast<uint8_t>(
             (value & 0x01u) << 7 |
