@@ -73,6 +73,8 @@ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
             RENAME br-thermal)
     install(FILES dist/60-br-thermal.rules
             DESTINATION lib/udev/rules.d)
+    install(FILES man/br-thermal.8
+            DESTINATION ${CMAKE_INSTALL_MANDIR}/man8)
     install(PROGRAMS dist/br-thermal-udev
             DESTINATION lib/udev)
 endif ()
