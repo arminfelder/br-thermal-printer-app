@@ -11,24 +11,24 @@
 #   udevadm control --reload-rules && udevadm trigger --subsystem-match=usb
 
 # TD-2020
-ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="2055", GROUP="_br-thermal", MODE="0660", TAG+="uaccess", RUN+="/usr/lib/udev/br-thermal-udev"
+ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="2055", GROUP="_br-thermal", MODE="0660", TAG+="uaccess", TAG+="systemd", ENV{SYSTEMD_WANTS}="br-thermal-autoadd.service"
 # TD-2120N
-ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="2057", GROUP="_br-thermal", MODE="0660", TAG+="uaccess", RUN+="/usr/lib/udev/br-thermal-udev"
+ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="2057", GROUP="_br-thermal", MODE="0660", TAG+="uaccess", TAG+="systemd", ENV{SYSTEMD_WANTS}="br-thermal-autoadd.service"
 # TD-2130N
-ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="2058", GROUP="_br-thermal", MODE="0660", TAG+="uaccess", RUN+="/usr/lib/udev/br-thermal-udev"
+ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="2058", GROUP="_br-thermal", MODE="0660", TAG+="uaccess", TAG+="systemd", ENV{SYSTEMD_WANTS}="br-thermal-autoadd.service"
 # TD-2030A
-ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="20f6", GROUP="_br-thermal", MODE="0660", TAG+="uaccess", RUN+="/usr/lib/udev/br-thermal-udev"
+ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="20f6", GROUP="_br-thermal", MODE="0660", TAG+="uaccess", TAG+="systemd", ENV{SYSTEMD_WANTS}="br-thermal-autoadd.service"
 # TD-2125N
-ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="20f7", GROUP="_br-thermal", MODE="0660", TAG+="uaccess", RUN+="/usr/lib/udev/br-thermal-udev"
+ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="20f7", GROUP="_br-thermal", MODE="0660", TAG+="uaccess", TAG+="systemd", ENV{SYSTEMD_WANTS}="br-thermal-autoadd.service"
 # TD-2125NWB
-ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="20f8", GROUP="_br-thermal", MODE="0660", TAG+="uaccess", RUN+="/usr/lib/udev/br-thermal-udev"
+ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="20f8", GROUP="_br-thermal", MODE="0660", TAG+="uaccess", TAG+="systemd", ENV{SYSTEMD_WANTS}="br-thermal-autoadd.service"
 # TD-2135N
-ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="20f9", GROUP="_br-thermal", MODE="0660", TAG+="uaccess", RUN+="/usr/lib/udev/br-thermal-udev"
+ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="20f9", GROUP="_br-thermal", MODE="0660", TAG+="uaccess", TAG+="systemd", ENV{SYSTEMD_WANTS}="br-thermal-autoadd.service"
 # TD-2135NWB
-ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="20fa", GROUP="_br-thermal", MODE="0660", TAG+="uaccess", RUN+="/usr/lib/udev/br-thermal-udev"
+ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="20fa", GROUP="_br-thermal", MODE="0660", TAG+="uaccess", TAG+="systemd", ENV{SYSTEMD_WANTS}="br-thermal-autoadd.service"
 # PT-E550W
-ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="2060", GROUP="_br-thermal", MODE="0660", TAG+="uaccess", RUN+="/usr/lib/udev/br-thermal-udev"
+ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="2060", GROUP="_br-thermal", MODE="0660", TAG+="uaccess", TAG+="systemd", ENV{SYSTEMD_WANTS}="br-thermal-autoadd.service"
 # PT-P750W
-ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="2062", GROUP="_br-thermal", MODE="0660", TAG+="uaccess", RUN+="/usr/lib/udev/br-thermal-udev"
+ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="2062", GROUP="_br-thermal", MODE="0660", TAG+="uaccess", TAG+="systemd", ENV{SYSTEMD_WANTS}="br-thermal-autoadd.service"
 # PT-P710BT
-ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="2064", GROUP="_br-thermal", MODE="0660", TAG+="uaccess", RUN+="/usr/lib/udev/br-thermal-udev"
+ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="2064", GROUP="_br-thermal", MODE="0660", TAG+="uaccess", TAG+="systemd", ENV{SYSTEMD_WANTS}="br-thermal-autoadd.service"
