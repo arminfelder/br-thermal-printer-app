@@ -2,6 +2,7 @@
 Description=Brother Thermal Printer Driver
 Documentation=https://github.com/arminfelder/br-thermal-printer-app
 After=network.target
+Wants=br-thermal-autoadd.service
 
 [Service]
 Type=exec
@@ -15,12 +16,13 @@ ExecStart=/usr/sbin/br-thermal server \
     -o log-level=${LOG_LEVEL} \
     -o spool-directory=/var/lib/br-thermal \
     -o server-options=no-tls
+ExecStartPost=/bin/sh -c 'until [ -S /tmp/br-thermal$(id -u).sock ]; do sleep 0.2; done'
 Restart=on-failure
 RestartSec=5
 
 User=_br-thermal
 Group=_br-thermal
-SupplementaryGroups=lp
+SupplementaryGroups=lp plugdev
 
 RuntimeDirectory=br-thermal
 StateDirectory=br-thermal
@@ -31,7 +33,7 @@ LogsDirectory=br-thermal
 # ---------------------------------------------------------------------------
 ProtectSystem=strict
 ProtectHome=true
-# /tmp is needed for the PAPPL IPC socket (/tmp/br-thermal<port>.sock)
+# /tmp is needed for the PAPPL IPC socket (/tmp/br-thermal<uid>.sock)
 ReadWritePaths=/tmp /var/lib/br-thermal
 PrivateTmp=false
 

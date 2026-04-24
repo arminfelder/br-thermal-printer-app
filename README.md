@@ -3,8 +3,8 @@
 Unofficial open-source Linux driver for Brother thermal printers, implemented
 as a [PAPPL](https://www.msweet.org/pappl/) printer application: a
 self-contained IPP server that exposes USB-connected Brother printers as
-standard network printers, compatible with CUPS, IPP Everywhere, and any
-RFC 8011 print client.
+standard network printers on localhost, to be used with CUPS or other IPP
+clients.
 
 The goal is broad coverage of Brother's thermal printer lineup. Currently
 supported models are listed below — contributions for additional models are
@@ -14,7 +14,7 @@ welcome.
 
 ## Supported Printers
 
-### Brother TD-2000 series (label printers)
+### Brother TD series
 
 | Model | Resolution | Media |
 |-------|-----------|-------|
@@ -27,13 +27,13 @@ welcome.
 | TD-2135N | 300 dpi | Continuous tape, die-cut labels |
 | TD-2135NWB | 300 dpi | Continuous tape, die-cut labels |
 
-### Brother PT series (tape printers)
+### Brother PT series
 
 | Model | Resolution | Media |
 |-------|-----------|-------|
 | PT-E550W | 180 dpi | TZe laminated tape (continuous) |
 | PT-P750W | 180 / 360 dpi | TZe laminated tape (continuous) |
-| PT-P710BT | 180 dpi | TZe laminated tape (continuous, Bluetooth) |
+| PT-P710BT | 180 dpi | TZe laminated tape (continuous) |
 
 ## Installation (Debian / Ubuntu)
 
@@ -58,36 +58,25 @@ ls ../*.deb
 ```bash
 sudo dpkg -i ../br-thermal_*.deb
 sudo apt-get install -f   # resolve any missing dependencies
-
-# Enable and start the service
-sudo systemctl enable --now br-thermal
-sudo systemctl status br-thermal
 ```
 
 The package:
 - installs the binary to `/usr/sbin/br-thermal`
 - creates a `_br-thermal` system user and group
 - installs a udev rule granting that user USB access to all supported printers
-- installs a systemd service that starts automatically on boot
+- installs a systemd service that starts automatically once a supported printer is connected
 
 ## Configuration
 
-Edit `/etc/default/br-thermal` to configure the service (survives package upgrades):
+Edit `/etc/default/br-thermal` to configure the service
 
 ```bash
 # Address the IPP server listens on.
-# "localhost" restricts to loopback; use a hostname or IP to expose on the network.
+# "localhost" restricts to loopback; use a hostname or IP to expose on the network(also restricted via the systemd unit file).
 LISTEN_HOSTNAME=localhost
 
 # Log level: fatal | error | warn | info | debug
 LOG_LEVEL=info
-```
-
-Apply changes by restarting the service:
-
-```bash
-sudo systemctl restart br-thermal
-journalctl -u br-thermal -f
 ```
 
 ## How It Works
@@ -101,21 +90,8 @@ CUPS filter pipeline. Instead:
   data into the Brother raster protocol and write it to the USB device
 
 On startup the server scans for connected USB devices and registers each
-supported printer as an IPP printer. There is no automatic USB hotplug
-detection — if a printer is connected after the service starts, trigger a
-rescan via the web UI or by restarting the service.
-
-### Accessing the Web Admin UI
-
-PAPPL includes a built-in web interface for managing printers, checking job
-status, and configuring media:
-
-```
-http://localhost:8631
-```
-
-Replace `localhost` with the server's hostname or IP if `LISTEN_HOSTNAME` is
-set to a network address.
+supported printer as an IPP printer. If a supported printer is connected
+later, a rescan/autoadd is triggered automatically via udev rules.
 
 ### Printing via CUPS
 
@@ -125,7 +101,7 @@ If auto-discovery is not available, add a queue manually:
 ```bash
 # Example for a TD-2020; replace the printer name in the URI as needed
 lpadmin -p brother-td2020 -E \
-  -v ipp://localhost:8631/ipp/print/TD-2020 \
+  -v ipp://localhost:$PORT/ipp/print/TD-2020 \
   -m everywhere
 ```
 
