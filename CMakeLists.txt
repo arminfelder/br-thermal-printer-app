@@ -66,12 +66,15 @@ add_subdirectory(src)
 if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     add_subdirectory(apps)
     install(FILES dist/br-thermal.service
+                  dist/br-thermal-autoadd.service
             DESTINATION lib/systemd/system)
     install(FILES dist/br-thermal.default
             DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/default
             RENAME br-thermal)
     install(FILES dist/60-br-thermal.rules
             DESTINATION lib/udev/rules.d)
+    install(PROGRAMS dist/br-thermal-udev
+            DESTINATION lib/udev)
 endif ()
 
 # ==============================================================================

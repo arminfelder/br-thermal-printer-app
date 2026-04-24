@@ -1,0 +1,11 @@
+[Unit]
+Description=Auto-add Brother thermal printers to br-thermal
+After=br-thermal.service
+
+[Service]
+Type=oneshot
+User=_br-thermal
+Group=_br-thermal
+SupplementaryGroups=plugdev
+ExecStartPre=/bin/sleep 2
+ExecStart=/usr/sbin/br-thermal autoadd

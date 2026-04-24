@@ -1,0 +1,3 @@
+#!/bin/sh
+systemctl start --no-block br-thermal.service
+systemctl start --no-block br-thermal-autoadd.service
