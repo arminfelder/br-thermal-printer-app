@@ -1,0 +1,277 @@
+.\" br-thermal man page
+.\"
+.\" Copyright (C) 2026  Armin Felder
+.\"
+.\" This program is free software: you can redistribute it and/or modify
+.\" it under the terms of the GNU General Public License as published by
+.\" the Free Software Foundation, either version 3 of the License, or
+.\" (at your option) any later version.
+.\"
+.TH br\-thermal 8 "2026-04-25" "br-thermal 0.1" "System Manager's Manual"
+.SH NAME
+br\-thermal \- IPP printer application for Brother thermal printers
+.SH SYNOPSIS
+.B br\-thermal
+.I SUB-COMMAND
+.RI [ OPTIONS ]
+.RI [ FILENAME ]
+.SH DESCRIPTION
+.B br\-thermal
+is a PAPPL-based printer application that exposes USB-connected Brother
+thermal printers as standard IPP network printers on localhost (or on the
+network, if configured).
+It acts as a self-contained IPP server: PAPPL handles the IPP protocol,
+web admin UI, DNS-SD/mDNS announcement (via Avahi), and USB device I/O,
+while
+.B br\-thermal
+provides the driver callbacks that convert PWG raster image data into the
+Brother raster protocol and write it to the USB device.
+.PP
+On startup the server scans for connected USB devices and registers each
+supported printer as an IPP printer.
+Subsequent hotplug events are handled automatically via a udev rule that
+triggers the
+.B autoadd
+sub-command.
+.SH SUB-COMMANDS
+.TP
+.B server
+Start the IPP server.
+This is the sub-command used by the systemd service.
+.TP
+.BI add " PRINTER"
+Add a printer queue manually.
+Requires
+.BR \-m ,
+.BR \-v ,
+and
+.BR \-d .
+.TP
+.B autoadd
+Scan all connected USB devices and automatically add any supported printer
+that is not yet registered.
+Requires a running server.
+.TP
+.B cancel
+Cancel one or more print jobs.
+.TP
+.BI default " PRINTER"
+Set the default printer.
+.TP
+.BI delete " PRINTER"
+Delete a printer queue.
+.TP
+.B devices
+List available devices.
+.TP
+.B drivers
+List supported driver names.
+.TP
+.B jobs
+List print jobs.
+.TP
+.BI modify " PRINTER"
+Modify a printer queue.
+.TP
+.B options
+List printer options.
+.TP
+.B pause
+Pause printing for a printer.
+.TP
+.B printers
+List registered printers.
+.TP
+.B resume
+Resume printing for a printer.
+.TP
+.B shutdown
+Shut down a running server.
+.TP
+.B status
+Show server, printer, or job status.
+.TP
+.B submit
+Submit a file for printing.
+.SH OPTIONS
+.TP
+.B \-a
+Cancel all jobs
+.RB ( cancel ).
+.TP
+.BI \-d " PRINTER"
+Specify the printer name.
+.TP
+.BI \-h " HOSTNAME"
+Specify the server hostname or address to connect to.
+.TP
+.BI \-j " JOB-ID"
+Specify a job ID
+.RB ( cancel ).
+.TP
+.BI \-m " DRIVER-NAME"
+Specify the driver name
+.RB ( add ", " modify ).
+See
+.B DRIVERS
+below.
+.TP
+.BI \-n " COPIES"
+Specify the number of copies
+.RB ( submit ).
+.TP
+.BI \-o " NAME=VALUE"
+Specify a named option
+.RB ( add ", " modify ", " server ", " submit ).
+The
+.B server
+sub-command accepts the following options via
+.BR \-o :
+.RS
+.TP
+.BI log-file= PATH
+Log destination.
+Use
+.B \-
+for standard output.
+.TP
+.BI listen-hostname= HOSTNAME
+Address the IPP server listens on.
+Use
+.B localhost
+to restrict to loopback (default), or a hostname/IP to expose on the network.
+.TP
+.BI server-name= HOSTNAME
+Advertised server name.
+.TP
+.BI log-level= LEVEL
+Log verbosity.
+One of
+.BR fatal ", " error ", " warn ", " info ", " debug .
+Default:
+.BR info .
+.TP
+.BI spool-directory= PATH
+Directory used to store job spool files.
+Default:
+.IR /var/lib/br-thermal .
+.TP
+.BI server-options= OPTIONS
+Comma-separated server option flags, e.g.\&
+.BR no-tls .
+.RE
+.TP
+.BI \-t " TITLE"
+Specify the job title
+.RB ( submit ).
+.TP
+.BI \-u " URI"
+Specify an
+.BR ipp: " or " ipps:
+printer or server URI.
+.TP
+.BI \-v " DEVICE-URI"
+Specify a
+.BR socket: " or " usb:
+device URI
+.RB ( add ", " modify ).
+.SH DRIVERS
+The following drivers are included:
+.TP
+.B brother_td_2000
+Covers the Brother TD-2000 series:
+TD-2020,
+TD-2120N,
+TD-2125N,
+TD-2125NWB,
+TD-2030A,
+TD-2130N,
+TD-2135N,
+TD-2135NWB.
+.TP
+.B brother_pte550w_p750w_p710bt
+Covers the Brother PT-E550W, PT-P750W, and PT-P710BT tape printers.
+.SH FILES
+.TP
+.I /etc/default/br-thermal
+Environment file read by the systemd service.
+Defines
+.B LISTEN_HOSTNAME
+and
+.BR LOG_LEVEL .
+.TP
+.I /var/lib/br-thermal
+Default spool and state directory.
+.TP
+.I /tmp/br-thermal\fIUID\fR.sock
+PAPPL IPC socket used for communication between sub-commands and a running
+server, where
+.I UID
+is the numeric user ID of the server process.
+.TP
+.I /lib/udev/rules.d/60-br-thermal.rules
+Udev rule granting the
+.B _br-thermal
+user USB access to supported printers and triggering
+.B autoadd
+on hotplug.
+.TP
+.I /lib/systemd/system/br-thermal.service
+Systemd service unit.
+.TP
+.I /lib/systemd/system/br-thermal-autoadd.service
+Oneshot systemd unit that runs
+.B br-thermal autoadd
+after the main service has started.
+.SH EXAMPLES
+Start the server, logging to the journal at info level:
+.PP
+.RS
+.EX
+br\-thermal server \-o log-file=\- \-o log-level=info \e
+    \-o listen-hostname=localhost \-o server-name=localhost \e
+    \-o spool-directory=/var/lib/br-thermal \-o server-options=no-tls
+.EE
+.RE
+.PP
+List all connected and supported devices:
+.PP
+.RS
+.EX
+br\-thermal devices
+.EE
+.RE
+.PP
+Add a TD-2120N printer manually:
+.PP
+.RS
+.EX
+br\-thermal add "TD-2120N" \-m brother_td_2000 \e
+    \-v usb://Brother/TD-2120N
+.EE
+.RE
+.PP
+Submit a print job:
+.PP
+.RS
+.EX
+br\-thermal submit \-d "TD-2120N" label.pwg
+.EE
+.RE
+.SH SEE ALSO
+.BR cupsd (8),
+.BR pappl (1),
+.PP
+Project home page:
+.I https://github.com/arminfelder/br-thermal-printer-app
+.SH AUTHOR
+Armin Felder.
+.SH COPYRIGHT
+Copyright \[co] 2026 Armin Felder.
+.PP
+.B br\-thermal
+is free software, licensed under the GNU General Public License version 3 or
+later.
+See
+.I https://www.gnu.org/licenses/
+for details.
