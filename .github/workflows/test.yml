@@ -6,31 +6,4 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
-    container:
-      image: debian:trixie
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install build dependencies
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends \
-            cmake \
-            pkg-config \
-            libpappl-dev \
-            libcups2-dev \
-            libssl-dev \
-            libavahi-client-dev \
-            libusb-1.0-0-dev \
-            build-essential
-
-      - name: Configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug
-
-      - name: Build
-        run: cmake --build build
-
-      - name: Run tests
-        run: ctest --test-dir build --output-on-failure
+    uses: ./.github/workflows/_test.yml

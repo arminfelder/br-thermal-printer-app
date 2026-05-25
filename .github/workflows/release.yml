@@ -6,11 +6,14 @@ on:
       - 'v*'
 
 jobs:
+  test:
+    uses: ./.github/workflows/_test.yml
+
   build-deb:
     uses: ./.github/workflows/_build-deb.yml
 
   release:
-    needs: build-deb
+    needs: [test, build-deb]
     runs-on: ubuntu-latest
     permissions:
       contents: write

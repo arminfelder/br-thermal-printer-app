@@ -1,8 +1,6 @@
 name: Conventional Commits
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
 
@@ -15,13 +13,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install commitizen
-        run: pip install commitizen
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
 
-      - name: Check commits
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            cz check --rev-range ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}
-          else
-            cz check --rev-range HEAD~1..HEAD
-          fi
+      - name: Install commitlint
+        run: npm install --no-save @commitlint/cli @commitlint/config-conventional
+
+      - name: Lint commits
+        run: npx commitlint --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }} --verbose
