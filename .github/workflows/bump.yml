@@ -37,13 +37,14 @@ jobs:
         run: |
           git config --global user.email "${{ steps.import-gpg.outputs.email }}"
           git config --global user.name "${{ steps.import-gpg.outputs.name }}"
+          git config --global push.gpgSign false
 
       - name: Install commitizen
         run: pip install commitizen
 
       - name: Bump version and generate changelog
         run: |
-          if cz bump --changelog --gpg-sign --yes; then
+          if cz bump --changelog --yes; then
             git push --follow-tags
           else
             EXIT_CODE=$?
