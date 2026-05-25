@@ -1,0 +1,27 @@
+name: Conventional Commits
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  commitlint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install commitizen
+        run: pip install commitizen
+
+      - name: Check commits
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            cz check --rev-range ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}
+          else
+            cz check --rev-range HEAD~1..HEAD
+          fi
