@@ -46,7 +46,7 @@ jobs:
         run: |
           if cz bump --changelog --yes; then
             git commit --amend --no-edit -S
-            git push --follow-tags
+            git push --tags origin HEAD:main
           else
             EXIT_CODE=$?
             if [ $EXIT_CODE -eq 21 ]; then
