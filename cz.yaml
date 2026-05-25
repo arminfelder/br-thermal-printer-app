@@ -1,0 +1,8 @@
+commitizen:
+  bump_message: "chore(release): bump version $current_version \u2192 $new_version"
+  name: cz_conventional_commits
+  version_scheme: semver2
+  tag_format: "v$version"
+  update_changelog_on_bump: true
+  version: 0.0.1
+  changelog_file: CHANGELOG.md
