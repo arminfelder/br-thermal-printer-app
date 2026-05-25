@@ -9,6 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write
 
     steps:
       - uses: actions/checkout@v4
@@ -43,10 +44,13 @@ jobs:
         run: pip install commitizen
 
       - name: Bump version and generate changelog
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if cz bump --changelog --yes; then
             git commit --amend --no-edit -S
             git push --tags origin HEAD:main
+            gh workflow run release.yml --ref "$NEW_TAG"
           else
             EXIT_CODE=$?
             if [ $EXIT_CODE -eq 21 ]; then
