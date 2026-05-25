@@ -45,6 +45,7 @@ jobs:
       - name: Bump version and generate changelog
         run: |
           if cz bump --changelog --yes; then
+            git commit --amend --no-edit -S
             git push --follow-tags
           else
             EXIT_CODE=$?
