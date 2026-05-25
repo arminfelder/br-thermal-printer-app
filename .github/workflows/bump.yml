@@ -1,18 +1,8 @@
 name: Bump Version & Changelog
 
 on:
-  workflow_dispatch:
-    inputs:
-      increment:
-        description: 'Version increment (leave empty for auto)'
-        required: false
-        type: choice
-        options:
-          - auto
-          - patch
-          - minor
-          - major
-        default: auto
+  push:
+    branches: [main]
 
 jobs:
   bump:
@@ -36,11 +26,13 @@ jobs:
 
       - name: Bump version and generate changelog
         run: |
-          if [ "${{ github.event.inputs.increment }}" = "auto" ] || [ -z "${{ github.event.inputs.increment }}" ]; then
-            cz bump --changelog
+          if cz bump --changelog; then
+            git push --follow-tags
           else
-            cz bump --changelog --increment ${{ github.event.inputs.increment }}
+            EXIT_CODE=$?
+            if [ $EXIT_CODE -eq 21 ]; then
+              echo "No version bump needed, skipping"
+            else
+              exit $EXIT_CODE
+            fi
           fi
-
-      - name: Push tag and changelog
-        run: git push --follow-tags
