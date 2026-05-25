@@ -455,14 +455,20 @@ namespace drivers::pte550w
                 : numberOfBytes(byteCount), raster(data) {}
             [[nodiscard]] std::vector<uint8_t> get() const noexcept {
                 std::vector<uint8_t> data;
-                data.reserve(raster_graphics_transfer.size() + 2
-                             + static_cast<size_t>(numberOfBytes));
+                data.reserve(raster_graphics_transfer.size() + 2 + raster.size());
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wstringop-overflow"
+#endif
                 data.insert(data.end(),
                             raster_graphics_transfer.begin(),
                             raster_graphics_transfer.end());
                 data.push_back(static_cast<uint8_t>(numberOfBytes & 0xFF));
                 data.push_back(static_cast<uint8_t>((numberOfBytes >> 8) & 0xFF));
                 data.insert(data.end(), raster.begin(), raster.end());
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
                 return data;
             }
         private:

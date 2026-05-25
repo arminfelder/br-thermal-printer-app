@@ -1,0 +1,43 @@
+name: Build Debian Package (reusable)
+
+on:
+  workflow_call:
+
+jobs:
+  build-deb:
+    runs-on: ubuntu-latest
+    container:
+      image: debian:trixie
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            devscripts \
+            debhelper \
+            cmake \
+            pkg-config \
+            libpappl-dev \
+            libcups2-dev \
+            libssl-dev \
+            libavahi-client-dev \
+            libusb-1.0-0-dev \
+            build-essential
+
+      - name: Build deb package
+        run: dpkg-buildpackage -us -uc -b
+
+      - name: Move artifacts
+        run: |
+          mkdir -p packages
+          mv ../*.deb ../*.buildinfo ../*.changes packages/ 2>/dev/null || true
+
+      - name: Upload deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: br-thermal-trixie-deb
+          path: packages/
+          retention-days: 30
