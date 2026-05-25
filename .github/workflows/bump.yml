@@ -48,8 +48,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if cz bump --changelog --yes; then
+            NEW_TAG=$(git describe --tags --abbrev=0)
             git commit --amend --no-edit -S
-            git push --tags origin HEAD:main
+            git tag -f "$NEW_TAG" HEAD
+            git push origin HEAD:main
+            git push -f origin "refs/tags/$NEW_TAG"
             gh workflow run release.yml --ref "$NEW_TAG"
           else
             EXIT_CODE=$?
