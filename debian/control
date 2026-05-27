@@ -4,6 +4,7 @@ Priority: optional
 Maintainer: Armin Felder <armin.felder@gmail.com>
 Build-Depends:
  debhelper-compat (= 13),
+ build-essential:native,
  cmake (>= 3.31),
  pkg-config,
  libpappl-dev,
