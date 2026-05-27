@@ -10,11 +10,23 @@ jobs:
   test:
     uses: ./.github/workflows/_test.yml
 
-  build-deb:
+  build-deb-amd64:
     uses: ./.github/workflows/_build-deb.yml
+    with:
+      arch: amd64
+
+  build-deb-arm64:
+    uses: ./.github/workflows/_build-deb.yml
+    with:
+      arch: arm64
+
+  build-deb-riscv64:
+    uses: ./.github/workflows/_build-deb.yml
+    with:
+      arch: riscv64
 
   release:
-    needs: [test, build-deb]
+    needs: [test, build-deb-amd64, build-deb-arm64, build-deb-riscv64]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -34,11 +46,12 @@ jobs:
           echo "$NOTES" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
 
-      - name: Download deb artifact
+      - name: Download deb artifacts
         uses: actions/download-artifact@v4
         with:
-          name: br-thermal-trixie-deb
+          pattern: br-thermal-trixie-*-deb
           path: packages/
+          merge-multiple: true
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
