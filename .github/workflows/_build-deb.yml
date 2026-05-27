@@ -50,10 +50,11 @@ jobs:
 
       - name: Build deb package
         run: |
-          if [ "${{ inputs.arch }}" = "amd64" ]; then                                                                                                                                                                                                                                                         
+          if [ "${{ inputs.arch }}" = "amd64" ]; then
             dpkg-buildpackage -us -uc -b
           else
-            dpkg-buildpackage --host-arch ${{ inputs.arch }} -Pcross,nocheck -us -uc -b
+            CONFIG_SITE=/etc/dpkg-cross/cross-config.${{ inputs.arch }} \
+              dpkg-buildpackage --host-arch ${{ inputs.arch }} -Pcross,nocheck -us -uc -b
           fi
 
       - name: Move artifacts
