@@ -2,6 +2,11 @@ name: Build Debian Package (reusable)
 
 on:
   workflow_call:
+    inputs:
+      arch:
+        required: true
+        type: string
+        description: "Target architecture: amd64, arm64, riscv64"
 
 jobs:
   build-deb:
@@ -14,21 +19,41 @@ jobs:
 
       - name: Install build dependencies
         run: |
+          if [ "${{ inputs.arch }}" != "amd64" ]; then
+            dpkg --add-architecture ${{ inputs.arch }}
+          fi
           apt-get update
-          apt-get install -y --no-install-recommends \
-            devscripts \
-            debhelper \
-            cmake \
-            pkg-config \
-            libpappl-dev \
-            libcups2-dev \
-            libssl-dev \
-            libavahi-client-dev \
-            libusb-1.0-0-dev \
-            build-essential
+          if [ "${{ inputs.arch }}" = "amd64" ]; then
+            apt-get install -y --no-install-recommends \
+              build-essential \
+              debhelper \
+              cmake \
+              pkg-config \
+              libpappl-dev \
+              libcups2-dev \
+              libssl-dev \
+              libavahi-client-dev \
+              libusb-1.0-0-dev
+          else
+            apt-get install -y --no-install-recommends \
+              crossbuild-essential-${{ inputs.arch }} \
+              debhelper \
+              cmake \
+              pkg-config \
+              libpappl-dev:${{ inputs.arch }} \
+              libcups2-dev:${{ inputs.arch }} \
+              libssl-dev:${{ inputs.arch }} \
+              libavahi-client-dev:${{ inputs.arch }} \
+              libusb-1.0-0-dev:${{ inputs.arch }}
+          fi
 
       - name: Build deb package
-        run: dpkg-buildpackage -us -uc -b
+        run: |
+          if [ "${{ inputs.arch }}" = "amd64" ]; then                                                                                                                                                                                                                                                         
+            dpkg-buildpackage -us -uc -b
+          else
+            dpkg-buildpackage --host-arch ${{ inputs.arch }} -Pcross,nocheck -us -uc -b
+          fi
 
       - name: Move artifacts
         run: |
@@ -38,6 +63,6 @@ jobs:
       - name: Upload deb artifact
         uses: actions/upload-artifact@v4
         with:
-          name: br-thermal-trixie-deb
+          name: br-thermal-trixie-${{ inputs.arch }}-deb
           path: packages/
           retention-days: 30
