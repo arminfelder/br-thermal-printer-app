@@ -49,7 +49,7 @@ class BrThermal
         static const char* autoadd_cb(const char *device_info, const char *device_uri, const char *device_id, void *extra);
         static bool driver_cb(pappl_system_t *system, const char *driver_name,const char *device_uri, const char *device_id,pappl_pr_driver_data_t *driver_data, ipp_t **driver_attrs, void *thiz);
 
-        std::string version{"0.1"};
+        std::string version{BR_THERMAL_VERSION};
         std::string footer{"br-thermal"};
 
         std::vector<pappl_pr_driver_t> drivers{
