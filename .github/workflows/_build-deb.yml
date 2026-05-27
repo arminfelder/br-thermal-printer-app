@@ -36,6 +36,7 @@ jobs:
               libusb-1.0-0-dev
           else
             apt-get install -y --no-install-recommends \
+              build-essential \
               crossbuild-essential-${{ inputs.arch }} \
               debhelper \
               cmake \
