@@ -17,6 +17,7 @@
 #define BR_THERMAL_PTE550W_H
 
 #include <array>
+#include <bit>
 #include <map>
 #include <mutex>
 #include <set>

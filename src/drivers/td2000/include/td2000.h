@@ -20,6 +20,7 @@
 #ifndef BR_THERMAL_TD2000_H
 #define BR_THERMAL_TD2000_H
 #include <array>
+#include <bit>
 #include <map>
 #include <mutex>
 #include <set>

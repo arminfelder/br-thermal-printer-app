@@ -49,6 +49,7 @@ include(${CMAKE_SOURCE_DIR}/cmake/SafetyFlags.cmake)
 # ==============================================================================
 # Dependencies
 # ==============================================================================
+option(STATIC_PAPPL_CUPS "Link PAPPL and CUPS statically (requires -dev packages with static libs)" OFF)
 include(${CMAKE_SOURCE_DIR}/cmake/PapplCups.cmake)
 pappl_cups_setup()
 

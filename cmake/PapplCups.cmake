@@ -15,146 +15,180 @@
 
 include_guard()
 
-function(pappl_cups_setup)
-    # NPROC helper
+# ---------------------------------------------------------------------------
+# Helper: resolve a pkg-config module to its static .a and create an
+# INTERFACE IMPORTED target named <alias>.
+#   _name        — pkg-config module name, e.g. "pappl"
+#   _alias       — CMake target name, e.g. "PAPPL::pappl"
+#   _fatal_hint  — extra text appended to the FATAL_ERROR when .a is missing
+# ---------------------------------------------------------------------------
+function(_add_static_pkg_target _name _alias _fatal_hint)
+    string(TOUPPER "${_name}" _upper)
+
+    pkg_check_modules(${_upper} REQUIRED STATIC ${_name})
+
+    find_library(${_upper}_STATIC_LIB NAMES "lib${_name}.a"
+            PATHS "${${_upper}_LIBRARY_DIRS}" NO_DEFAULT_PATH)
+    if(NOT ${_upper}_STATIC_LIB)
+        message(FATAL_ERROR
+                "lib${_name}.a not found in ${${_upper}_LIBRARY_DIRS} — ${_fatal_hint}")
+    endif()
+
+    # Replace the bare module name with the resolved .a path so the linker
+    # gets an absolute path rather than -l<name> (which would pick the .so).
+    set(_deps "${${_upper}_STATIC_LIBRARIES}")
+    list(REMOVE_ITEM _deps "${_name}")
+
+    add_library(${_alias} INTERFACE IMPORTED)
+    set_target_properties(${_alias} PROPERTIES
+            INTERFACE_INCLUDE_DIRECTORIES "${${_upper}_STATIC_INCLUDE_DIRS}"
+            INTERFACE_LINK_LIBRARIES      "${${_upper}_STATIC_LIB};${_deps}"
+    )
+endfunction()
+
+# ---------------------------------------------------------------------------
+# System packages — static linking
+# ---------------------------------------------------------------------------
+function(_pappl_cups_system_static)
+    find_package(PkgConfig REQUIRED)
+    message(STATUS "[PapplCups] Linking PAPPL and CUPS statically")
+    _add_static_pkg_target(pappl PAPPL::pappl "install libpappl-dev")
+    _add_static_pkg_target(cups  CUPS::cups   "install libcups2-dev")
+endfunction()
+
+# ---------------------------------------------------------------------------
+# System packages — dynamic linking
+# ---------------------------------------------------------------------------
+function(_pappl_cups_system_dynamic)
+    find_package(PkgConfig REQUIRED)
+
+    pkg_check_modules(PAPPL REQUIRED IMPORTED_TARGET pappl)
+    add_library(PAPPL::pappl INTERFACE IMPORTED)
+    set_target_properties(PAPPL::pappl PROPERTIES
+            INTERFACE_LINK_LIBRARIES PkgConfig::PAPPL
+    )
+
+    pkg_check_modules(CUPS IMPORTED_TARGET cups)
+    if(CUPS_FOUND)
+        add_library(CUPS::cups INTERFACE IMPORTED)
+        set_target_properties(CUPS::cups PROPERTIES
+                INTERFACE_LINK_LIBRARIES PkgConfig::CUPS
+        )
+    else()
+        find_package(CUPS REQUIRED MODULE)
+        add_library(CUPS::cups INTERFACE IMPORTED)
+        set_target_properties(CUPS::cups PROPERTIES
+                INTERFACE_INCLUDE_DIRECTORIES "${CUPS_INCLUDE_DIR}"
+                INTERFACE_LINK_LIBRARIES      "${CUPS_LIBRARIES}"
+        )
+    endif()
+endfunction()
+
+# ---------------------------------------------------------------------------
+# Build CUPS + PAPPL from source via ExternalProject
+# ---------------------------------------------------------------------------
+function(_pappl_cups_from_source)
     include(ProcessorCount)
     ProcessorCount(NPROC)
     if(NOT NPROC OR NPROC EQUAL 0)
         set(NPROC 1)
     endif()
 
-    if(NOT BUILD_PAPPL_FROM_SOURCE)
-        find_package(PkgConfig REQUIRED)
-
-        pkg_check_modules(PAPPL REQUIRED IMPORTED_TARGET pappl)
-        add_library(PAPPL::pappl INTERFACE IMPORTED)
-        set_target_properties(PAPPL::pappl PROPERTIES
-                INTERFACE_LINK_LIBRARIES PkgConfig::PAPPL
-        )
-
-        pkg_check_modules(CUPS REQUIRED IMPORTED_TARGET cups)
-        add_library(CUPS::cups INTERFACE IMPORTED)
-        set_target_properties(CUPS::cups PROPERTIES
-                INTERFACE_LINK_LIBRARIES PkgConfig::CUPS
-        )
-        return()
-    endif()
-
+    include(FetchContent)
     include(ExternalProject)
 
-    ####################################################################
-    ## CUPS
-    ####################################################################
-    set(CUPS_PREFIX       "${CMAKE_BINARY_DIR}/cups-prefix")
-    set(CUPS_INSTALL_DIR  "${CUPS_PREFIX}/install")
-    file(MAKE_DIRECTORY "${CUPS_INSTALL_DIR}/include")
-    file(MAKE_DIRECTORY "${CUPS_INSTALL_DIR}/lib64")
-    file(MAKE_DIRECTORY "${CUPS_INSTALL_DIR}/etc/rc.d")
+    # -------------------------------------------------------------------------
+    # CUPS
+    # -------------------------------------------------------------------------
+    set(_cups_install   "${CMAKE_BINARY_DIR}/cups-prefix/install")
+    set(_cups_pkgconfig "${_cups_install}/lib/pkgconfig")
+    set(_cups_lib       "${_cups_install}/lib64/libcups.so.2")
+    set(_cups_image_lib "${_cups_install}/lib64/libcupsimage.so.2")
 
-    set(CUPS_LIB "${CUPS_INSTALL_DIR}/lib64/libcups.so.2")
-    set(CUPS_IMAGE_LIB "${CUPS_INSTALL_DIR}/lib64/libcupsimage.so.2")
+    file(MAKE_DIRECTORY "${_cups_install}/include"
+                        "${_cups_install}/lib64"
+                        "${_cups_install}/etc/rc.d")
 
-    set(CUPS_LIBS
-            "${CUPS_LIB}"
-            "${CUPS_IMAGE_LIB}"
+    set(_cups_flags
+            --prefix=${_cups_install}
+            --with-rcdir=${_cups_install}/etc/rc.d
+            --libdir=${_cups_install}/lib64
     )
-
-    set(CUPS_PKGCONFIG_DIR "${CUPS_INSTALL_DIR}/lib/pkgconfig")
-
-    set(CUPS_CONFIGURE_FLAGS
-            --prefix=${CUPS_INSTALL_DIR}
-            --with-rcdir=${CUPS_INSTALL_DIR}/etc/rc.d
-            --libdir=${CUPS_INSTALL_DIR}/lib64
-    )
+    set(_cups_cflags "")
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-        list(APPEND CUPS_CONFIGURE_FLAGS --enable-debug)
-        set(CUPS_CFLAGS "-g -O0")
+        list(APPEND _cups_flags --enable-debug)
+        set(_cups_cflags "-g -O0")
     endif()
 
-        include(FetchContent)
-        FetchContent_Declare(
-                cups_src
-                GIT_REPOSITORY https://github.com/OpenPrinting/cups.git
-                GIT_TAG        v2.4.16
-        )
-        FetchContent_MakeAvailable(cups_src)
-        set(CUPS_SOURCE_DIR "${cups_src_SOURCE_DIR}")
+    FetchContent_Declare(cups_src
+            GIT_REPOSITORY https://github.com/OpenPrinting/cups.git
+            GIT_TAG        v2.4.16
+    )
+    FetchContent_MakeAvailable(cups_src)
 
     ExternalProject_Add(cups_proj
-            SOURCE_DIR        "${CUPS_SOURCE_DIR}"
+            SOURCE_DIR        "${cups_src_SOURCE_DIR}"
             CONFIGURE_COMMAND ${CMAKE_COMMAND} -E env
-            CFLAGS=${CUPS_CFLAGS}
-            ./configure ${CUPS_CONFIGURE_FLAGS}
+                              CFLAGS=${_cups_cflags}
+                              ./configure ${_cups_flags}
             BUILD_COMMAND     make -j${NPROC}
             INSTALL_COMMAND   make install-libs
             BUILD_IN_SOURCE   1
-            BUILD_BYPRODUCTS  ${CUPS_LIBS}
+            BUILD_BYPRODUCTS  "${_cups_lib}" "${_cups_image_lib}"
     )
 
     add_library(cups_external SHARED IMPORTED)
     set_target_properties(cups_external PROPERTIES
-            IMPORTED_LOCATION             ${CUPS_LIB}
-            INTERFACE_INCLUDE_DIRECTORIES "${CUPS_INSTALL_DIR}/include"
+            IMPORTED_LOCATION             "${_cups_lib}"
+            INTERFACE_INCLUDE_DIRECTORIES "${_cups_install}/include"
     )
+    add_dependencies(cups_external cups_proj)
 
     add_library(CUPS::cups INTERFACE IMPORTED)
     set_target_properties(CUPS::cups PROPERTIES
             INTERFACE_LINK_LIBRARIES cups_external
     )
 
-    ####################################################################
-    ## PAPPL
-    ####################################################################
-    set(PAPPL_PREFIX       "${CMAKE_BINARY_DIR}/pappl-prefix")
-    set(PAPPL_INSTALL_DIR  "${PAPPL_PREFIX}/install")
+    # -------------------------------------------------------------------------
+    # PAPPL (depends on CUPS)
+    # -------------------------------------------------------------------------
+    set(_pappl_install "${CMAKE_BINARY_DIR}/pappl-prefix/install")
+    set(_pappl_lib     "${_pappl_install}/lib/libpappl.so")
 
-    file(MAKE_DIRECTORY "${PAPPL_INSTALL_DIR}/include")
-    file(MAKE_DIRECTORY "${PAPPL_INSTALL_DIR}/lib")
+    file(MAKE_DIRECTORY "${_pappl_install}/include" "${_pappl_install}/lib")
 
-    set(PAPPL_LIB "${PAPPL_INSTALL_DIR}/lib/libpappl.so")
-
-    set(PAPPL_CONFIGURE_FLAGS
-            --prefix=${PAPPL_INSTALL_DIR}
-    )
+    set(_pappl_flags --prefix=${_pappl_install})
+    set(_pappl_cflags "")
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-        list(APPEND PAPPL_CONFIGURE_FLAGS --enable-debug)
-        set(PAPPL_CFLAGS "-g -O0")
+        list(APPEND _pappl_flags --enable-debug)
+        set(_pappl_cflags "-g -O0")
     endif()
 
-
-    include(FetchContent)
-    FetchContent_Declare(
-            pappl_src
+    FetchContent_Declare(pappl_src
             GIT_REPOSITORY https://github.com/michaelrsweet/pappl.git
             GIT_TAG        v1.4.10
     )
     FetchContent_MakeAvailable(pappl_src)
-    set(PAPPL_SOURCE_DIR "${pappl_src_SOURCE_DIR}")
-
-    set(PAPPL_ENV
-            PKG_CONFIG_PATH=${CUPS_PKGCONFIG_DIR}:$ENV{PKG_CONFIG_PATH}
-            CPPFLAGS=-I${CUPS_INSTALL_DIR}/include
-            LDFLAGS=-L${CUPS_INSTALL_DIR}/lib
-    )
 
     ExternalProject_Add(pappl_proj
-            SOURCE_DIR        "${PAPPL_SOURCE_DIR}"
+            SOURCE_DIR        "${pappl_src_SOURCE_DIR}"
             CONFIGURE_COMMAND ${CMAKE_COMMAND} -E env
-            ${PAPPL_ENV}
-            CFLAGS=${PAPPL_CFLAGS}
-            ./configure ${PAPPL_CONFIGURE_FLAGS}
+                              PKG_CONFIG_PATH=${_cups_pkgconfig}:$ENV{PKG_CONFIG_PATH}
+                              CPPFLAGS=-I${_cups_install}/include
+                              LDFLAGS=-L${_cups_install}/lib
+                              CFLAGS=${_pappl_cflags}
+                              ./configure ${_pappl_flags}
             BUILD_COMMAND     make -j${NPROC}
             INSTALL_COMMAND   make install
             BUILD_IN_SOURCE   1
-            BUILD_BYPRODUCTS  "${PAPPL_LIB}"
+            BUILD_BYPRODUCTS  "${_pappl_lib}"
     )
-
     add_dependencies(pappl_proj cups_proj)
 
     add_library(pappl_external SHARED IMPORTED)
     set_target_properties(pappl_external PROPERTIES
-            IMPORTED_LOCATION             "${PAPPL_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${PAPPL_INSTALL_DIR}/include"
+            IMPORTED_LOCATION             "${_pappl_lib}"
+            INTERFACE_INCLUDE_DIRECTORIES "${_pappl_install}/include"
     )
     add_dependencies(pappl_external pappl_proj)
 
@@ -162,4 +196,17 @@ function(pappl_cups_setup)
     set_target_properties(PAPPL::pappl PROPERTIES
             INTERFACE_LINK_LIBRARIES pappl_external
     )
+endfunction()
+
+# ---------------------------------------------------------------------------
+# Public entry point
+# ---------------------------------------------------------------------------
+function(pappl_cups_setup)
+    if(BUILD_PAPPL_FROM_SOURCE)
+        _pappl_cups_from_source()
+    elseif(STATIC_PAPPL_CUPS)
+        _pappl_cups_system_static()
+    else()
+        _pappl_cups_system_dynamic()
+    endif()
 endfunction()

@@ -13,7 +13,7 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-cmake_minimum_required(VERSION 3.31)
+cmake_minimum_required(VERSION 3.25)
 
 add_library(br_thermal)
 
@@ -30,7 +30,7 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif ()
 
 
-target_compile_definitions(br_thermal PRIVATE BR_THERMAL_VERSION="${PROJECT_VERSION}")
+target_compile_definitions(br_thermal PUBLIC BR_THERMAL_VERSION="${PROJECT_VERSION}")
 target_compile_features(br_thermal PUBLIC cxx_std_23)
 target_link_libraries(br_thermal PUBLIC PAPPL::pappl CUPS::cups drivers::td2000 drivers::pte550w)
 

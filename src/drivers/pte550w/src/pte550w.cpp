@@ -201,8 +201,7 @@ namespace drivers::pte550w
             info.pageType    = (pageNumber == 0) ? types::PageType::startingPage
                                                  : types::PageType::otherPage;
 
-            const auto rasterLineCount =
-                static_cast<uint32_t>(options->header.cupsHeight);
+            const auto rasterLineCount = options->header.cupsHeight;
             const auto rasterBytes =
                 std::bit_cast<std::array<uint8_t, 4>>(rasterLineCount);
             std::ranges::copy(rasterBytes, info.rasterNumber);
@@ -276,7 +275,7 @@ namespace drivers::pte550w
             const auto fields = info.fields();
             if (fields.statusType == types::StatusType::ErrorOccurred)
             {
-                unsigned int status = PAPPL_PREASON_NONE;
+                pappl_preason_t status = PAPPL_PREASON_NONE;
                 if (fields.errorInformation2.coverOpen)
                     status |= PAPPL_PREASON_COVER_OPEN;
                 if (fields.errorInformation1.noMedia)
@@ -288,8 +287,7 @@ namespace drivers::pte550w
                 if (fields.errorInformation1.weakBatteries ||
                     fields.errorInformation2.overheating)
                     status |= PAPPL_PREASON_OTHER;
-                papplPrinterSetReasons(printer,
-                                       static_cast<pappl_preason_t>(status),
+                papplPrinterSetReasons(printer, status,
                                        PAPPL_PREASON_DEVICE_STATUS);
             }
             else if (fields.statusType == types::StatusType::TurnedOff)

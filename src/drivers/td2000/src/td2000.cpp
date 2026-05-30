@@ -204,7 +204,7 @@ namespace drivers::td2000
             info.mediaWidth  = static_cast<uint8_t>(options->media.size_width  / 100);
             info.mediaLength = static_cast<uint8_t>(options->media.size_length / 100);
             // Raster number is 4 bytes little-endian (n5=LSB, n8=MSB).
-            const auto rasterLineCount = static_cast<uint32_t>(options->header.cupsHeight);
+            const auto rasterLineCount = options->header.cupsHeight;
             const auto rasterBytes = std::bit_cast<std::array<uint8_t, 4>>(rasterLineCount);
             std::ranges::copy(rasterBytes, info.rasterNumber);
 
@@ -261,7 +261,7 @@ namespace drivers::td2000
             const auto fields = info.fields();
             if (fields.statusType == types::StatusType::ErrorOccurred)
             {
-                unsigned int status = PAPPL_PREASON_NONE;
+                pappl_preason_t status = PAPPL_PREASON_NONE;
                 if (fields.errorInformation2.coverOpen)
                     status |= PAPPL_PREASON_COVER_OPEN;
                 if (fields.errorInformation1.noMedia || fields.errorInformation1.endOfMedia)
@@ -274,7 +274,7 @@ namespace drivers::td2000
                     fields.errorInformation2.systemError ||
                     fields.errorInformation2.communicationError)
                     status |= PAPPL_PREASON_OTHER;
-                papplPrinterSetReasons(printer, static_cast<pappl_preason_t>(status),
+                papplPrinterSetReasons(printer, status,
                                        PAPPL_PREASON_DEVICE_STATUS);
             }
             else if (fields.statusType == types::StatusType::TurnedOff)

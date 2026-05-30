@@ -2,6 +2,23 @@
 
 export DEB_BUILD_MAINT_OPTIONS = hardening=-fortify
 
+DISTRO := $(shell dpkg-parsechangelog -S Distribution)
+
+# Bookworm ships GCC 12 (no std::format); link libstdc++ statically so the
+# binary built on Trixie runs on Bookworm without a runtime dependency bump.
+# The 'static' build profile forces static linking regardless of distro:
+#   dpkg-buildpackage -Pstatic,...
+ifeq ($(DISTRO),bookworm)
+    STATIC_LIBSTDCXX  := ON
+    STATIC_PAPPL_CUPS := ON
+else ifneq (,$(filter static,$(DEB_BUILD_PROFILES)))
+    STATIC_LIBSTDCXX  := ON
+    STATIC_PAPPL_CUPS := ON
+else
+    STATIC_LIBSTDCXX  := OFF
+    STATIC_PAPPL_CUPS := OFF
+endif
+
 %:
 	dh $@ --buildsystem=cmake
 
@@ -10,7 +27,9 @@ override_dh_auto_configure:
 		-DCMAKE_BUILD_TYPE=Release \
 		-DCMAKE_INSTALL_SYSCONFDIR=/etc \
 		-DBUILD_PAPPL_FROM_SOURCE=OFF \
-		-DBUILD_TESTING=OFF
+		-DBUILD_TESTING=OFF \
+		-DSTATIC_LIBSTDCXX=$(STATIC_LIBSTDCXX) \
+		-DSTATIC_PAPPL_CUPS=$(STATIC_PAPPL_CUPS)
 
 override_dh_installsystemd:
 	dh_installsystemd --no-start

@@ -19,6 +19,7 @@
 
 #ifndef BR_THERMAL_UTIL_H
 #define BR_THERMAL_UTIL_H
+#include <format>
 #include <fstream>
 #include <vector>
 #include <ranges>
