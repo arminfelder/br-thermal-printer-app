@@ -40,12 +40,16 @@ jobs:
           git config --global user.name "${{ steps.import-gpg.outputs.name }}"
           git config --global push.gpgSign false
 
-      - name: Install commitizen
-        run: pip install commitizen
+      - name: Install dependencies
+        run: |
+          sudo apt-get install -y devscripts
+          pip install commitizen
 
       - name: Bump version and generate changelog
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEBEMAIL: ${{ steps.import-gpg.outputs.email }}
+          DEBFULLNAME: ${{ steps.import-gpg.outputs.name }}
         run: |
           if cz bump --changelog --yes; then
             NEW_TAG=$(git describe --tags --abbrev=0)

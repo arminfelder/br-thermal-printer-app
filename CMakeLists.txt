@@ -14,13 +14,17 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 cmake_minimum_required(VERSION 3.31)
+file(READ "${CMAKE_SOURCE_DIR}/VERSION" BR_THERMAL_VERSION)
+string(STRIP "${BR_THERMAL_VERSION}" BR_THERMAL_VERSION)
 project(
         br_thermal
-        VERSION 0.1
+        VERSION ${BR_THERMAL_VERSION}
         DESCRIPTION "application for Brother Thermal printers"
         LANGUAGES C CXX
         #SPDX_LICENSE GPL-3.0-or-later
 )
+
+add_compile_definitions(BR_THERMAL_VERSION="${BR_THERMAL_VERSION}")
 
 # ==============================================================================
 # Build Reproducibility Configuration
