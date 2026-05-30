@@ -24,6 +24,8 @@ project(
         #SPDX_LICENSE GPL-3.0-or-later
 )
 
+add_compile_definitions(BR_THERMAL_VERSION="${BR_THERMAL_VERSION}")
+
 # ==============================================================================
 # Build Reproducibility Configuration
 # ==============================================================================
