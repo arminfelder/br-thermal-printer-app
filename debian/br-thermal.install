@@ -1,0 +1,6 @@
+usr/sbin/br-thermal
+usr/lib/systemd/system/br-thermal.service
+usr/lib/systemd/system/br-thermal-autoadd.service
+etc/default/br-thermal
+usr/lib/udev/rules.d/60-br-thermal.rules
+usr/share/man/man8/br-thermal.8

@@ -1,0 +1,15 @@
+# Build directories
+/build/
+/_build/
+/cmake-build-*/
+obj-*/
+
+# Build outputs
+/debs/
+*.deb
+*.buildinfo
+*.changes
+
+# IDE / tooling
+/.idea/
+/.claude/

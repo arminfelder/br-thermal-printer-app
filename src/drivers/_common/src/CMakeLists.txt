@@ -24,6 +24,11 @@ target_sources(utils
 
 target_compile_features(utils PUBLIC cxx_std_23)
 
+# util.cpp (and the public util.h) include pappl/* headers. Link PAPPL::pappl
+# PUBLIC so the include dirs propagate and, when CUPS/PAPPL are built from
+# source, utils builds after those archives are available.
+target_link_libraries(utils PUBLIC PAPPL::pappl)
+
 target_include_directories(utils
         PUBLIC
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>

@@ -25,8 +25,26 @@ jobs:
     with:
       arch: riscv64
 
+  # Static (Bookworm/Clang/libc++) — portable to older releases. amd64 + arm64
+  # only; riscv64 has no apt.llvm.org libc++ toolchain.
+  build-deb-static-amd64:
+    uses: ./.github/workflows/_build-deb-static.yml
+    with:
+      arch: amd64
+
+  build-deb-static-arm64:
+    uses: ./.github/workflows/_build-deb-static.yml
+    with:
+      arch: arm64
+
   release:
-    needs: [test, build-deb-amd64, build-deb-arm64, build-deb-riscv64]
+    needs:
+      - test
+      - build-deb-amd64
+      - build-deb-arm64
+      - build-deb-riscv64
+      - build-deb-static-amd64
+      - build-deb-static-arm64
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -49,7 +67,7 @@ jobs:
       - name: Download deb artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: br-thermal-trixie-*-deb
+          pattern: br-thermal-*-deb
           path: packages/
           merge-multiple: true
 

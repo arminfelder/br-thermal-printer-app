@@ -1,0 +1,78 @@
+# Build a Bookworm-portable static .deb.
+#
+# Why this is a separate Dockerfile from the cross/dynamic one:
+#   A .deb's dynamic dependencies (glibc, libssl, libpng, libavahi, ...) are
+#   pinned to the package names and versions of the distro it was BUILT on.
+#   Building on Trixie yields deps like libssl3t64 / libc6 (>= 2.38) that do
+#   not exist / are too new on Bookworm. The only fix is to build ON Bookworm.
+#
+#   But Bookworm's stock GCC 12 cannot compile this project (no <format>, partial
+#   C++23/26) and its CMake is 3.25 (< 3.31 required). So we build natively on
+#   Bookworm with Clang + libc++ from apt.llvm.org and an upstream CMake. libc++
+#   /libc++abi are linked statically (USE_LIBCXX + STATIC_LIBSTDCXX) so the modern
+#   C++ runtime ships inside the binary; CUPS/PAPPL are built statically from
+#   source. Only Bookworm's own libc6/libssl3/libpng16-16/libavahi-client3/... stay
+#   dynamic, and they resolve correctly because dpkg-shlibdeps runs on Bookworm.
+#
+# Built natively for the target arch — run under qemu-user/binfmt on a foreign
+# host (build-debs.sh passes --platform). No cross toolchain involved.
+FROM debian:bookworm
+
+ARG LLVM_VERSION=19
+ARG CMAKE_VERSION=3.31.6
+
+# Base build deps + the :native dev libs CUPS/PAPPL and the app link against.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates \
+      curl \
+      gnupg \
+      build-essential \
+      debhelper \
+      pkg-config \
+      git \
+      autoconf \
+      xz-utils \
+      libssl-dev \
+      libavahi-client-dev \
+      libusb-1.0-0-dev \
+      zlib1g-dev \
+      libpng-dev \
+      libjpeg-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Clang + libc++ from apt.llvm.org (Bookworm's GCC 12 lacks std::format).
+RUN curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key \
+      | gpg --dearmor -o /usr/share/keyrings/llvm.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] http://apt.llvm.org/bookworm/ llvm-toolchain-bookworm-${LLVM_VERSION} main" \
+      > /etc/apt/sources.list.d/llvm.list \
+    && apt-get update && apt-get install -y --no-install-recommends \
+      clang-${LLVM_VERSION} \
+      libc++-${LLVM_VERSION}-dev \
+      libc++abi-${LLVM_VERSION}-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Bookworm ships CMake 3.25; project requires >= 3.31. Use the upstream static
+# build (statically linked, runs on any glibc). Arch-matched to the image.
+RUN ARCH="$(dpkg --print-architecture)" \
+    && case "$ARCH" in \
+         arm64) CM_ARCH=aarch64 ;; \
+         amd64) CM_ARCH=x86_64 ;; \
+         *) echo "unsupported arch: $ARCH" >&2; exit 1 ;; \
+       esac \
+    && curl -fsSL "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-${CM_ARCH}.tar.gz" \
+      | tar -xz --strip-components=1 -C /usr/local
+
+# Compiler for both the CMake build and the from-source CUPS/PAPPL autotools.
+ENV CC=clang-${LLVM_VERSION}
+ENV CXX=clang++-${LLVM_VERSION}
+
+COPY . /src
+WORKDIR /src
+
+# static => BUILD_PAPPL_FROM_SOURCE + STATIC_LIBSTDCXX ; libcxx => USE_LIBCXX
+# (debian/rules). nocheck skips the testsuite. -d skips dpkg build-dep checks
+# because Clang and the upstream CMake are not installed as dpkg packages.
+RUN dpkg-buildpackage -Pstatic,libcxx,nocheck -d -us -uc -b
+
+# dpkg-buildpackage -b drops the .deb in the parent of the source tree (/).
+RUN mkdir -p /output && cp /*.deb /output/

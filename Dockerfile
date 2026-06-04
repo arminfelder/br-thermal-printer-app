@@ -1,32 +1,49 @@
 FROM debian:trixie
 
-RUN dpkg --add-architecture arm64
+ARG HOST=aarch64-linux-gnu
+ARG ARCH=arm64
+
+# Build profiles passed to dpkg-buildpackage. Default = static: CUPS/PAPPL built
+# from source (BUILD_PAPPL_FROM_SOURCE). For a dynamic build pass
+# PROFILES=cross,nocheck and supply the distro -dev packages via EXTRA_BUILD_DEPS
+# (libpappl-dev:<arch> libcups2-dev:<arch>).
+ARG PROFILES=cross,nocheck,static
+ARG EXTRA_BUILD_DEPS=
+
+RUN dpkg --add-architecture ${ARCH}
 
 RUN apt-get update
 
+# Toolchain + the :${ARCH} -dev packages that CUPS/PAPPL link against. CUPS and
+# PAPPL themselves are built statically from source by the `static` build
+# profile (BUILD_PAPPL_FROM_SOURCE in debian/rules), so no libpappl-dev /
+# libcups2-dev here. git is needed for the FetchContent clone of CUPS/PAPPL.
 RUN apt-get install -y --no-install-recommends \
       build-essential \
-      crossbuild-essential-arm64 \
+      crossbuild-essential-${ARCH} \
       debhelper \
       cmake \
       pkg-config \
-      libpappl-dev:arm64 \
-      libcups2-dev:arm64 \
-      libssl-dev:arm64 \
-      libavahi-client-dev:arm64 \
-      libusb-1.0-0-dev:arm64
-
-# Bookworm's libcups2-dev (2.4.2) predates cups.pc; generate it for the arm64 sysroot
-RUN CUPS_VER=$(dpkg-query -W -f='${Version}' libcups2-dev:arm64 | cut -d- -f1) && \
-    mkdir -p /usr/lib/aarch64-linux-gnu/pkgconfig && \
-    printf 'prefix=/usr\nexec_prefix=${prefix}\nlibdir=${prefix}/lib/aarch64-linux-gnu\nincludedir=${prefix}/include\n\nName: CUPS\nDescription: CUPS API Library\nVersion: %s\nCflags: -I${includedir}\nLibs: -L${libdir} -lcups\n' "$CUPS_VER" \
-      > /usr/lib/aarch64-linux-gnu/pkgconfig/cups.pc
+      git \
+      ca-certificates \
+      autoconf \
+      libssl-dev:${ARCH} \
+      libavahi-client-dev:${ARCH} \
+      libusb-1.0-0-dev:${ARCH} \
+      zlib1g-dev:${ARCH} \
+      libpng-dev:${ARCH} \
+      libjpeg-dev:${ARCH} \
+      ${EXTRA_BUILD_DEPS}
 
 COPY . /src
 
 WORKDIR /src
 
-RUN ./build-deb-arm64.sh
+# `static` profile => STATIC_LIBSTDCXX=ON + BUILD_PAPPL_FROM_SOURCE=ON
+# (debian/rules), yielding a binary with libstdc++, CUPS and PAPPL all linked
+# statically; only their system deps (ssl, avahi, usb, z, png, jpeg) stay dynamic.
+RUN CONFIG_SITE=/etc/dpkg-cross/cross-config.${ARCH} \
+      dpkg-buildpackage --host-arch ${ARCH} -P${PROFILES} -us -uc -b
 
 # Copy .deb packages to /output so callers can bind-mount a host directory there.
 # Example: docker run --rm -v $(pwd)/dist:/output <image>

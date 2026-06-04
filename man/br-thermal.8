@@ -191,6 +191,13 @@ TD-2135NWB.
 .TP
 .B brother_pte550w_p750w_p710bt
 Covers the Brother PT-E550W, PT-P750W, and PT-P710BT tape printers.
+.SH EXIT STATUS
+.B br\-thermal
+exits
+.B 0
+on success and a non-zero status on failure, for example an unknown
+sub-command, a missing required option, or an I/O error communicating with
+the printer or a running server.
 .SH FILES
 .TP
 .I /etc/default/br-thermal
@@ -259,8 +266,8 @@ br\-thermal submit \-d "TD-2120N" label.pwg
 .EE
 .RE
 .SH SEE ALSO
-.BR cupsd (8),
 .BR pappl (1),
+.BR cupsd (8)
 .PP
 Project home page:
 .I https://github.com/arminfelder/br-thermal-printer-app

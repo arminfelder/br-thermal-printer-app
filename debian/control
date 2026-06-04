@@ -7,19 +7,31 @@ Build-Depends:
  build-essential:native,
  cmake (>= 3.31),
  pkg-config,
- libpappl-dev,
- libcups2-dev,
  libssl-dev,
  libavahi-client-dev,
  libusb-1.0-0-dev,
+# Dynamic build (default): link against the distro CUPS/PAPPL.
+ libpappl-dev <!static>,
+ libcups2-dev <!static>,
+# Static build (profile 'static'): CUPS/PAPPL are built from source, which
+# needs git/network plus their own build dependencies.
+ git <static>,
+ ca-certificates <static>,
+ zlib1g-dev <static>,
+ libpng-dev <static>,
+ libjpeg-dev <static>,
 Standards-Version: 4.7.4
 Homepage: https://github.com/arminfelder/br-thermal-printer-app
+Vcs-Git: https://github.com/arminfelder/br-thermal-printer-app.git
+Vcs-Browser: https://github.com/arminfelder/br-thermal-printer-app
 Rules-Requires-Root: no
 
+# Dynamic build (default): links against the distro CUPS/PAPPL shared libraries.
 Package: br-thermal
 Section: text
 Priority: optional
 Architecture: any
+Build-Profiles: <!static>
 Depends:
  ${shlibs:Depends},
  ${misc:Depends},
@@ -27,4 +39,29 @@ Depends:
  cups
 Description: Brother thermal printer driver
  A CUPS/IPP printer driver for Brother thermal label printers.
- Implements the raster printing protocol via the PAPPL library
+ Implements the raster printing protocol via the PAPPL library.
+
+# Static build (profile 'static'): CUPS and PAPPL are linked statically (built
+# from source), so the package is self-contained and portable to older Debian
+# releases (e.g. Bookworm) that lack a compatible libpappl/libcups. Only the
+# base system libraries remain dynamic.
+Package: br-thermal-static
+Section: text
+Priority: optional
+Architecture: any
+Build-Profiles: <static>
+Provides: br-thermal (= ${binary:Version})
+Conflicts: br-thermal
+Replaces: br-thermal
+Depends:
+ ${shlibs:Depends},
+ ${misc:Depends},
+ adduser,
+ cups
+Description: Brother thermal printer driver (static build)
+ A CUPS/IPP printer driver for Brother thermal label printers.
+ Implements the raster printing protocol via the PAPPL library.
+ .
+ This build links CUPS and PAPPL statically, making it self-contained and
+ installable on distributions whose system libpappl/libcups are missing or
+ too old. It conflicts with and replaces the dynamically-linked br-thermal.

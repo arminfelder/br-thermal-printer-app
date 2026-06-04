@@ -111,7 +111,12 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "GNU")
     try_add_flag(WARNING_FLAGS -Wbidi-chars=any)   # GCC >= 12
 elseif (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     list(APPEND WARNING_FLAGS
+            # Clang-only. Flags every raw pointer/array subscript it cannot prove
+            # bounded — unsatisfiable against PAPPL's C array structs (e.g.
+            # driver_data.source[]) without adopting std::span everywhere. Keep
+            # it as a diagnostic but do NOT make it fatal under -Werror.
             -Wunsafe-buffer-usage
+            -Wno-error=unsafe-buffer-usage
     )
 endif ()
 
@@ -249,7 +254,8 @@ add_link_options(${HARDENING_LINK_FLAGS})
 # Options
 # ---------------------------------------------------------------------------
 option(ENABLE_SANITIZERS "Enable runtime sanitizers for debug builds" OFF)
-option(STATIC_LIBSTDCXX "Link libstdc++ and libgcc statically (for running on older distros)" OFF)
+option(STATIC_LIBSTDCXX "Link the C++ standard library and libgcc statically (for running on older distros)" OFF)
+option(USE_LIBCXX "Use LLVM libc++ as the C++ standard library (Clang only)" OFF)
 
 # ---------------------------------------------------------------------------
 # _FORTIFY_SOURCE
@@ -319,11 +325,31 @@ endif ()
 # ---------------------------------------------------------------------------
 # Static libstdc++/libgcc (cross-distro deployment)
 # ---------------------------------------------------------------------------
+# Select libc++ (LLVM) as the C++ standard library. Required on distros whose
+# stock GCC libstdc++ is too old for the C++ features this project uses
+# (e.g. std::format on Debian Bookworm / GCC 12). Clang only.
+if (USE_LIBCXX)
+    if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        message(STATUS "[SafetyFlags] Using libc++ (LLVM C++ standard library)")
+        add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>)
+        add_link_options(-stdlib=libc++)
+    else ()
+        message(WARNING "[SafetyFlags] USE_LIBCXX requires Clang; ignoring")
+    endif ()
+endif ()
+
 if (STATIC_LIBSTDCXX)
     if (CMAKE_CXX_COMPILER_ID MATCHES "GNU")
         message(STATUS "[SafetyFlags] Linking libstdc++ and libgcc statically")
         add_link_options(-static-libstdc++ -static-libgcc)
+    elseif (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        # Clang's -static-libstdc++ statically links whichever C++ runtime
+        # -stdlib selects (here libc++ + libc++abi). libgcc_s is left dynamic:
+        # it is ABI-stable with a very low version floor, present on every glibc
+        # system, so it does not constrain the target distro.
+        message(STATUS "[SafetyFlags] Linking the C++ standard library statically")
+        add_link_options(-static-libstdc++)
     else ()
-        message(WARNING "[SafetyFlags] STATIC_LIBSTDCXX is only supported with GCC")
+        message(WARNING "[SafetyFlags] STATIC_LIBSTDCXX is not supported for this compiler")
     endif ()
 endif ()

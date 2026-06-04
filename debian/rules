@@ -2,21 +2,33 @@
 
 export DEB_BUILD_MAINT_OPTIONS = hardening=-fortify
 
-DISTRO := $(shell dpkg-parsechangelog -S Distribution)
-
-# Bookworm ships GCC 12 (no std::format); link libstdc++ statically so the
-# binary built on Trixie runs on Bookworm without a runtime dependency bump.
-# The 'static' build profile forces static linking regardless of distro:
-#   dpkg-buildpackage -Pstatic,...
-ifeq ($(DISTRO),bookworm)
-    STATIC_LIBSTDCXX  := ON
-    STATIC_PAPPL_CUPS := ON
-else ifneq (,$(filter static,$(DEB_BUILD_PROFILES)))
-    STATIC_LIBSTDCXX  := ON
-    STATIC_PAPPL_CUPS := ON
+# The 'static' build profile selects the self-contained br-thermal-static binary
+# package (see debian/control Build-Profiles). It links CUPS/PAPPL statically:
+# Debian ships no libpappl.a/libcups.a, so this builds both as static archives
+# from source (BUILD_PAPPL_FROM_SOURCE) and links libstdc++/libc++ statically.
+#   dpkg-buildpackage -Pstatic[,libcxx],...
+#
+# NB: a .deb's *dynamic* deps (glibc, ssl, png, avahi) are pinned by
+# dpkg-shlibdeps to the names+versions of the distro it is BUILT on, regardless
+# of static linking. A Bookworm-installable package must therefore be built ON
+# Bookworm (see Dockerfile.static: Clang + libc++, since Bookworm GCC 12 lacks
+# std::format).
+ifneq (,$(filter static,$(DEB_BUILD_PROFILES)))
+    STATIC_LIBSTDCXX        := ON
+    BUILD_PAPPL_FROM_SOURCE := ON
 else
-    STATIC_LIBSTDCXX  := OFF
-    STATIC_PAPPL_CUPS := OFF
+    STATIC_LIBSTDCXX        := OFF
+    BUILD_PAPPL_FROM_SOURCE := OFF
+endif
+
+# The 'libcxx' profile selects LLVM libc++ as the C++ standard library and links
+# it statically (USE_LIBCXX + STATIC_LIBSTDCXX). Used when building with Clang on
+# a distro whose stock GCC libstdc++ is too old for this project's C++ features
+# (e.g. std::format on Bookworm/GCC 12). Compiler is chosen via CC/CXX in the env.
+ifneq (,$(filter libcxx,$(DEB_BUILD_PROFILES)))
+    USE_LIBCXX := ON
+else
+    USE_LIBCXX := OFF
 endif
 
 %:
@@ -26,10 +38,16 @@ override_dh_auto_configure:
 	dh_auto_configure -- \
 		-DCMAKE_BUILD_TYPE=Release \
 		-DCMAKE_INSTALL_SYSCONFDIR=/etc \
-		-DBUILD_PAPPL_FROM_SOURCE=OFF \
+		-DBUILD_PAPPL_FROM_SOURCE=$(BUILD_PAPPL_FROM_SOURCE) \
 		-DBUILD_TESTING=OFF \
 		-DSTATIC_LIBSTDCXX=$(STATIC_LIBSTDCXX) \
-		-DSTATIC_PAPPL_CUPS=$(STATIC_PAPPL_CUPS)
+		-DUSE_LIBCXX=$(USE_LIBCXX) \
+		$(if $(filter ON,$(BUILD_PAPPL_FROM_SOURCE)),-DFETCHCONTENT_FULLY_DISCONNECTED=OFF)
 
 override_dh_installsystemd:
 	dh_installsystemd --no-start
+
+# Skip dwz: it fails (exit 1) on the Clang/libc++ DWARF-5 output. dwz only
+# deduplicates DWARF in the -dbgsym package (size optimization); skipping it
+# has no effect on the runtime binary.
+override_dh_dwz:

@@ -1,0 +1,55 @@
+name: Build Static Debian Package (reusable)
+
+# Builds the self-contained br-thermal-static package on Debian Bookworm with
+# Clang + libc++ (Dockerfile.static). Installable on Bookworm and newer.
+# Foreign architectures are built natively under QEMU/binfmt emulation.
+
+on:
+  workflow_call:
+    inputs:
+      arch:
+        required: true
+        type: string
+        description: "Target architecture: amd64, arm64 (riscv64 unsupported — no libc++ toolchain)"
+
+jobs:
+  build-static-deb:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # binfmt/QEMU so the Bookworm <arch> container's RUN steps execute when
+      # arch != the amd64 runner. No-op for amd64.
+      - name: Set up QEMU
+        if: inputs.arch != 'amd64'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build static .deb image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.static
+          platforms: linux/${{ inputs.arch }}
+          tags: br-thermal-build:static-${{ inputs.arch }}
+          load: true
+
+      # docker create + cp does not execute the image, so extracting the staged
+      # /output works on the amd64 host even for a foreign-arch image.
+      - name: Extract .deb from image
+        run: |
+          mkdir -p packages
+          cid=$(docker create br-thermal-build:static-${{ inputs.arch }})
+          docker cp "$cid:/output/." packages/
+          docker rm "$cid"
+          ls -l packages/
+
+      - name: Upload deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: br-thermal-bookworm-static-${{ inputs.arch }}-deb
+          path: packages/
+          retention-days: 30
