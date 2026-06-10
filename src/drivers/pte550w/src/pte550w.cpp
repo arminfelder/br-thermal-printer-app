@@ -676,8 +676,14 @@ namespace drivers::pte550w
         driverData->bottom_top = 0;
 
         driverData->num_source = 2;
+#ifdef __clang__
+#pragma clang unsafe_buffer_usage begin
+#endif
         driverData->source[0]  = "main-roll";
         driverData->source[1]  = "auto";
+#ifdef __clang__
+#pragma clang unsafe_buffer_usage end
+#endif
 
         driverData->num_type = static_cast<int>(mediaTypes.size());
         std::ranges::copy(mediaTypes, driverData->type);

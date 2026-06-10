@@ -19,14 +19,20 @@ FetchContent_Declare(
         Catch2
         GIT_REPOSITORY https://github.com/catchorg/Catch2.git
         GIT_TAG v3.12.0
+        # Treat Catch2's headers as system headers so our enforced
+        # -Werror=unsafe-buffer-usage does not fire on Catch2's internals
+        # when test TUs include them. Our own test code stays enforced.
+        SYSTEM
 )
 FetchContent_MakeAvailable(Catch2)
-if(TARGET Catch2)
-    target_compile_options(Catch2 PRIVATE
-            -Wno-error
-            -Wno-switch-enum
-    )
-endif()
+foreach(_catch2_target Catch2 Catch2WithMain)
+    if(TARGET ${_catch2_target})
+        target_compile_options(${_catch2_target} PRIVATE
+                -Wno-error
+                -Wno-switch-enum
+        )
+    endif()
+endforeach()
 #
 #add_executable(br_thermal_tests
 #        util.cpp

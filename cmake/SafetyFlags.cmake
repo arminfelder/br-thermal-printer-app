@@ -112,11 +112,11 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "GNU")
 elseif (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     list(APPEND WARNING_FLAGS
             # Clang-only. Flags every raw pointer/array subscript it cannot prove
-            # bounded — unsatisfiable against PAPPL's C array structs (e.g.
-            # driver_data.source[]) without adopting std::span everywhere. Keep
-            # it as a diagnostic but do NOT make it fatal under -Werror.
+            # bounded. Every site in our own sources is audited and wrapped in a
+            # `#pragma clang unsafe_buffer_usage begin/end` region, so this is
+            # enforced as fatal under -Werror. Third-party deps that trip it
+            # (e.g. Catch2) suppress it per-target at their fetch site.
             -Wunsafe-buffer-usage
-            -Wno-error=unsafe-buffer-usage
     )
 endif ()
 
