@@ -29,6 +29,8 @@ extern "C" {
 }
 
 
+#include <string>
+
 #include "BrThermal.h"
 
 void BrThermal::runServer(const int argc, char** argv)
@@ -47,36 +49,63 @@ const char* BrThermal::autoadd_cb([[maybe_unused]] const char* device_info, [[ma
 
     const int num_did = papplDeviceParseID(device_id, &did);
 
-    if (num_did > 0)
+    // cupsGetOption returns a null pointer when the key is absent. std::string_view has no
+    // null constructor, thus a null pointer here calls strlen(nullptr).
+    if (const char *mdl = cupsGetOption("MDL", num_did, did); mdl != nullptr)
     {
-        if (const std::string_view model(cupsGetOption("MDL", num_did, did)); !model.empty()){
-            if (driverMapping.contains(model))
-            {
-                ret = driverMapping.at(model).c_str();
-            }
+        if (const std::string_view model(mdl); !model.empty() && driverMapping.contains(model))
+        {
+            ret = driverMapping.at(model).c_str();
         }
     }
     cupsFreeOptions(num_did, did);
     return ret;
 }
 
-bool BrThermal::driver_cb([[maybe_unused]] pappl_system_t* system, [[maybe_unused]] const char* driver_name, [[maybe_unused]] const char* device_uri,
+bool BrThermal::driver_cb([[maybe_unused]] pappl_system_t* system, const char* driver_name, const char* device_uri,
     const char* device_id, pappl_pr_driver_data_t* driver_data, [[maybe_unused]] ipp_t** driver_attrs, [[maybe_unused]] void* thiz)
 {
     driver_data->format = "image/pwg-raster";
 
+    // device_id is null when the client names the driver, for example an IPP Create-Printer
+    // that carries smi55357-driver. papplDeviceParseID then gives no options and
+    // cupsGetOption returns a null pointer, which std::string_view cannot hold.
     cups_option_t *did = nullptr;
     const int num_did = papplDeviceParseID(device_id, &did);
-    const auto model = std::string_view(cupsGetOption("MDL", num_did, did));
+    const char *mdl = cupsGetOption("MDL", num_did, did);
+    // Own the text: it must stay valid after the options are released.
+    std::string model(mdl != nullptr ? mdl : "");
+    cupsFreeOptions(num_did, did);
 
-        if (std::string_view(driver_name) == "brother_td_2000")
+    if (model.empty() && device_uri != nullptr)
+    {
+        // No device ID, thus take the model from the device URI. PAPPL builds it as
+        // "usb://Brother/PT-P750W?serial=000C3G547030", so the model is the last path
+        // segment, without the query.
+        std::string_view uri(device_uri);
+        if (const auto query = uri.find('?'); query != std::string_view::npos)
         {
-            return drivers::td2000::updateDriverData(driver_data, model);
+            uri = uri.substr(0, query);
         }
-        if (std::string_view(driver_name) == "brother_pte550w_p750w_p710bt")
+        if (const auto slash = uri.rfind('/'); slash != std::string_view::npos)
         {
-            return drivers::pte550w::updateDriverData(driver_data, model);
+            model = uri.substr(slash + 1);
         }
+    }
+
+    if (driver_name == nullptr)
+    {
+        return false;
+    }
+
+    if (std::string_view(driver_name) == "brother_td_2000")
+    {
+        return drivers::td2000::updateDriverData(driver_data, model);
+    }
+    if (std::string_view(driver_name) == "brother_pte550w_p750w_p710bt")
+    {
+        return drivers::pte550w::updateDriverData(driver_data, model);
+    }
     return false;
 }
 
