@@ -66,6 +66,16 @@ include(GNUInstallDirs)
 include_directories(include)
 
 # ==============================================================================
+# Testing
+# ==============================================================================
+# include(CTest) must run before add_subdirectory(src). The subdirectories read
+# BUILD_TESTING, which CTest sets. Related: src/drivers/td2000/CMakeLists.txt.
+include(CTest)
+if (BUILD_TESTING)
+    enable_testing()
+endif ()
+
+# ==============================================================================
 # Main Targets
 # ==============================================================================
 add_subdirectory(src)
@@ -85,11 +95,6 @@ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 
 endif ()
 
-# ==============================================================================
-# Testing
-# ==============================================================================
-include(CTest)
 if (BUILD_TESTING)
-    enable_testing()
     add_subdirectory(tests)
 endif ()

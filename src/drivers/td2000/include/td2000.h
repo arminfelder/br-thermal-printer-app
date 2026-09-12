@@ -173,6 +173,8 @@ namespace drivers::td2000
             void set_fields(const Fields& value) noexcept {
                 raw = std::bit_cast<std::array<uint8_t, Size>>(value);
             }
+
+            bool operator==(const PackedProtocolBlock&) const noexcept = default;
         };
 
         //TODO: refactor to prevent undefined behaviour under C++
@@ -254,7 +256,8 @@ namespace drivers::td2000
         using PrinterInfo = PackedProtocolBlock<PrinterInfoFields, 32>;
 
         // 127-byte media blob payload of ESC i U (1Bh 69h 55h 77h 01h).
-        // Field names are derived from PTD source files (e.g. bst202ed.txt).
+        // Field names and offsets come from the Brother PTD source bst202ed.txt.
+        // The print area and offset values agree with the label table of raster spec 2.3.2 (b).
         struct __attribute__((packed)) MediaInfoFields {
             uint8_t  sensorId;              // [0]    PTD: nSensorID (63 for TD-2000 series)
             uint8_t  energyRank;            // [1]    PTD: byEnergyRank
@@ -262,13 +265,12 @@ namespace drivers::td2000
             uint8_t  paperLengthMm;         // [3]    PTD: nPaperLength/10 (mm); 0 for continuous tape
             uint8_t  headDivide;            // [4]    PTD: byHeadDivide (always 0)
             uint8_t  rollWidMm;             // [5]    PTD: byRollWidMm
-            uint8_t  pinOffsetLeft;         // [6]    PTD: wPinOffsetLeft (0–116; unsigned)
-            uint8_t  reserved0;             // [7]    reserved (always 0)
+            uint16_t pinOffsetLeft;         // [6-7]  PTD: wPinOffsetLeft, little-endian (dots)
             uint16_t imageAreaWidthRes;     // [8-9]  PTD: nImageAreaWidthRes, little-endian (dots)
             uint16_t imageAreaLengthRes;    // [10-11] PTD: nImageAreaLengthRes, little-endian (dots); 0 for continuous
-            uint8_t  dieStartPlus;          // [12]   PTD: nDieStartPlus (always 0)
-            uint8_t  dieStartRev;           // [13]   PTD: nDieStartRev (always 0)
-            uint8_t  dieStartFwd;           // [14]   PTD: nDieStartFwd (always 0)
+            uint8_t  dieStartPlus;          // [12]   PTD: nDieStartPlus
+            uint8_t  dieStartRev;           // [13]   PTD: nDieStartRev
+            uint8_t  dieStartFwd;           // [14]   PTD: nDieStartFwd
             uint8_t  virtualOffsetX;        // [15]   PTD: nVirtualOffsetX (dots)
             uint8_t  reserved1;             // [16]   reserved (always 0)
             uint8_t  virtualOffsetY;        // [17]   PTD: nVirtualOffsetY (dots)
@@ -284,32 +286,23 @@ namespace drivers::td2000
             uint8_t  reserved5[2];          // [109-110] reserved (always 0)
             uint16_t lblPitchDot;           // [111-112] PTD: lblPitchDot, little-endian; 0 for continuous tape
             uint8_t  reserved6[2];          // [113-114] reserved (always 0)
-            // [115-123] PTD: reserved_12_[0..8] (first 9 of 12 values).
-            // Byte [6] of this array (blob[121]): 0=continuous tape, 1=die-cut label.
-            uint8_t  reserved_12_[9];
-            int8_t   detectionSensitivity;  // [124] PTD: markNoChkValu (always 0)
-            int8_t   luminesenceSensitivity;// [125] always 0
-            uint8_t  reserved7;             // [126] reserved (always 0)
+            // [115-126] hold the 12 values of PTD reserved_12_. Both 16-bit values below equal the
+            // "Length offset" column of raster spec 2.3.2 (b): 24 dots at 203 dpi, 35 at 300 dpi.
+            // They are the same for every medium of a family, and equal util::minFeedMargin.
+            uint16_t lengthOffsetDots1;     // [115-116] reserved_12_[0..1]
+            uint8_t  reserved_12_2to5[4];   // [117-120] reserved_12_[2..5]; 0 in every known medium
+            // [121] reserved_12_[6]. Only 0 (continuous) and 1 (die-cut) occur in the known
+            // media. Other values can exist, thus do not treat this field as a boolean.
+            uint8_t  mediaClass;
+            uint16_t lengthOffsetDots2;     // [122-123] reserved_12_[7..8]
+            int8_t   detectionSensitivity;  // [124]     reserved_12_[9]
+            int8_t   luminesenceSensitivity;// [125]     reserved_12_[10]
+            uint8_t  reserved7;             // [126]     reserved_12_[11]
         };
         static_assert(sizeof(MediaInfoFields) == 127, "MediaInfo must match protocol size (127 bytes)");
         static_assert(std::is_trivially_copyable_v<MediaInfoFields>);
 
-        struct MediaInfo {
-            std::array<uint8_t, 127> raw{};
-
-            [[nodiscard]] MediaInfoFields fields() const noexcept {
-                return std::bit_cast<MediaInfoFields>(raw);
-            }
-
-            void set_fields(const MediaInfoFields& fields) noexcept {
-                raw = std::bit_cast<std::array<uint8_t, 127>>(fields);
-            }
-
-            bool operator==(const MediaInfo& expr_lhs)const
-            {
-                return std::equal(raw.begin(), raw.end(), expr_lhs.raw.begin() );
-            }
-        };
+        using MediaInfo = PackedProtocolBlock<MediaInfoFields, 127>;
 
         struct JobData {
             ModelFamily modelFamily = ModelFamily::Td2x2x;
@@ -657,6 +650,20 @@ namespace drivers::td2000
                                               util::units::MediaSize width,
                                               util::units::MediaSize length,
                                               types::MediaType type) noexcept;
+
+        // The {n3} and {n4} bytes of ESC i z. They must agree with the media record that
+        // ESC i U sent, thus they come from that record and not from the request. If they
+        // disagree, the printer reports a media error. See raster spec 4, ESC i z.
+        struct PrintInfoMedia
+        {
+            uint8_t width;      // {n3} mm
+            uint8_t length;     // {n4} mm; 0 when the length does not fit one byte
+            bool    lengthValid; // clear PI_LENGTH when false
+        };
+
+        [[nodiscard]] PrintInfoMedia printInfoMedia(const types::MediaInfo& info,
+                                                    types::MediaType type,
+                                                    util::units::MediaSize requestedLength) noexcept;
 
         constexpr types::MediaInfo none{
             .raw =  {}

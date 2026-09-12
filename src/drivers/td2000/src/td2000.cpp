@@ -203,8 +203,13 @@ namespace drivers::td2000
                                static_cast<uint8_t>(types::PrintInfoFlags::pi_recover) |
                                static_cast<uint8_t>(types::PrintInfoFlags::pi_length);
             info.pageType = (pageNumber == 0) ? types::PageType::startingPage : types::PageType::otherPage;
-            info.mediaWidth  = static_cast<uint8_t>(util::units::toWholeMillimetres(mediaWidth));
-            info.mediaLength = static_cast<uint8_t>(util::units::toWholeMillimetres(mediaLength));
+            const auto printMedia = media::printInfoMedia(mediaInfo, mediaType, mediaLength);
+            info.mediaWidth  = printMedia.width;
+            info.mediaLength = printMedia.length;
+            if (!printMedia.lengthValid)
+            {
+                info.validFields &= static_cast<uint8_t>(~static_cast<uint8_t>(types::PrintInfoFlags::pi_length));
+            }
             // Raster number is 4 bytes little-endian (n5=LSB, n8=MSB).
             const auto rasterLineCount = static_cast<uint32_t>(options->header.cupsHeight);
             const auto rasterBytes = std::bit_cast<std::array<uint8_t, 4>>(rasterLineCount);
@@ -658,21 +663,62 @@ namespace drivers::td2000
                                           : pick(td2x2x::_58mm, td2x3x::_58mm);
 
             case types::MediaType::DieCutLabels:
-                if (width <= 40 * mm)
+            {
+                // Sorted by width, then length. Select the first entry that is not smaller than
+                // the request in both dimensions. This is the smallest label that holds the job.
+                struct DieCutEntry
                 {
-                    if (length <= 40 * mm) return pick(td2x2x::_40x40mm, td2x3x::_40x40mm);
-                    if (length <= 50 * mm) return pick(td2x2x::_40x50mm, td2x3x::_40x50mm);
-                    if (length <= 60 * mm) return pick(td2x2x::_40x60mm, td2x3x::_40x60mm);
+                    util::units::MediaSize width;
+                    util::units::MediaSize length;
+                    const types::MediaInfo& td2x2x_val;
+                    const types::MediaInfo& td2x3x_val;
+                };
+                static const std::array dieCutTable{
+                    DieCutEntry{30 * mm, 30 * mm, td2x2x::_30x30mm, td2x3x::_30x30mm},
+                    DieCutEntry{40 * mm, 40 * mm, td2x2x::_40x40mm, td2x3x::_40x40mm},
+                    DieCutEntry{40 * mm, 50 * mm, td2x2x::_40x50mm, td2x3x::_40x50mm},
+                    DieCutEntry{40 * mm, 60 * mm, td2x2x::_40x60mm, td2x3x::_40x60mm},
+                    DieCutEntry{50 * mm, 30 * mm, td2x2x::_50x30mm, td2x3x::_50x30mm},
+                    DieCutEntry{51 * mm, 26 * mm, td2x2x::_51x26mm, td2x3x::_51x26mm},
+                    DieCutEntry{60 * mm, 60 * mm, td2x2x::_60x60mm, td2x3x::_60x60mm},
+                };
+                for (const auto& entry : dieCutTable)
+                {
+                    if (width <= entry.width && length <= entry.length)
+                    {
+                        return pick(entry.td2x2x_val, entry.td2x3x_val);
+                    }
                 }
-                else if (width <= 50 * mm) return pick(td2x2x::_50x30mm, td2x3x::_50x30mm);
-                else if (width <= 51 * mm) return pick(td2x2x::_51x26mm, td2x3x::_51x26mm);
-                else if (width <= 60 * mm) return pick(td2x2x::_60x60mm, td2x3x::_60x60mm);
                 return none; // dimensions outside handled ranges
+            }
 
             case types::MediaType::NoMedia:
             default:
                 return none;
             }
+        }
+
+        PrintInfoMedia printInfoMedia(const types::MediaInfo& info,
+                                      const types::MediaType type,
+                                      const util::units::MediaSize requestedLength) noexcept
+        {
+            const auto record = info.fields();
+
+            if (type == types::MediaType::DieCutLabels)
+            {
+                // The label has a fixed length, thus the record holds both dimensions.
+                return {record.paperWidth, record.paperLengthMm, true};
+            }
+
+            // Continuous tape: the record gives the tape width, the job gives the length.
+            const auto lengthMm = util::units::toWholeMillimetres(requestedLength);
+            if (lengthMm < 0 || lengthMm > 255)
+            {
+                // {n4} is one byte. Spec 2.3.4 permits up to 1000 mm, thus long jobs cannot
+                // declare their length. Clear PI_LENGTH instead of sending a truncated value.
+                return {record.paperWidth, 0, false};
+            }
+            return {record.paperWidth, static_cast<uint8_t>(lengthMm), true};
         }
     }
 
