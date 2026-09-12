@@ -56,7 +56,7 @@ TEST_CASE("MediaInfoFields - parse continuous tape blob (57mm)", "[media][MediaI
     SECTION("sizeMM string") { REQUIRE(std::string(fields.sizeMM) == "RD 57mm"); }
     SECTION("sizeIN string") { REQUIRE(std::string(fields.sizeIN) == "2.25\""); }
     SECTION("lblPitchDot is 0 for continuous tape") { REQUIRE(fields.lblPitchDot == 0); }
-    SECTION("reserved_12_[6] == 0 marks continuous tape") { REQUIRE(fields.reserved_12_[6] == 0); }
+    SECTION("mediaClass == 0 marks continuous tape") { REQUIRE(fields.mediaClass == 0); }
 }
 
 TEST_CASE("MediaInfoFields - parse die-cut label blob (40x40mm)", "[media][MediaInfoFields]") {
@@ -73,7 +73,7 @@ TEST_CASE("MediaInfoFields - parse die-cut label blob (40x40mm)", "[media][Media
     SECTION("sizeMM string") { REQUIRE(std::string(fields.sizeMM) == "40mm x 40mm"); }
     SECTION("sizeIN string") { REQUIRE(std::string(fields.sizeIN) == "1.5\" x 1.5\""); }
     SECTION("lblPitchDot is non-zero for die-cut") { REQUIRE(fields.lblPitchDot == 348); }
-    SECTION("reserved_12_[6] == 1 marks die-cut label") { REQUIRE(fields.reserved_12_[6] == 1); }
+    SECTION("mediaClass == 1 marks die-cut label") { REQUIRE(fields.mediaClass == 1); }
 }
 
 // ---------------------------------------------------------------------------
@@ -122,13 +122,13 @@ TEST_CASE("MediaInfo - set_fields writes correct raw bytes", "[media][MediaInfo]
     SECTION("imageAreaWidthRes high byte at 9") { REQUIRE(info.raw[9] == 0x01); }
 }
 
-TEST_CASE("MediaInfo - two blobs with different reserved_12_[6] compare unequal", "[media][MediaInfo]") {
+TEST_CASE("MediaInfo - two blobs with different mediaClass compare unequal", "[media][MediaInfo]") {
     const auto continuous = td2x2x::_57mm;
     const auto diecut     = td2x2x::_40x40mm;
 
     REQUIRE_FALSE(continuous == diecut);
-    REQUIRE(continuous.fields().reserved_12_[6] == 0);
-    REQUIRE(diecut.fields().reserved_12_[6] == 1);
+    REQUIRE(continuous.fields().mediaClass == 0);
+    REQUIRE(diecut.fields().mediaClass == 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -283,6 +283,174 @@ TEST_CASE("getMediaInfoForMedia - DieCutLabels 60mm width", "[media]") {
     }
 }
 
+TEST_CASE("MediaInfoFields - print area matches raster spec 2.3.2 (b)", "[media][MediaInfoFields]") {
+    // Columns 3 and 4 of the die-cut label table, Raster Command Reference v1.01 page 13.
+    struct SpecRow { const types::MediaInfo& blob; uint16_t id; uint16_t printAreaWidth; uint16_t printAreaLength; };
+
+    SECTION("Td2x2x at 203 dpi") {
+        const std::array rows{
+            SpecRow{td2x2x::_51x26mm, 422, 382, 157},
+            SpecRow{td2x2x::_30x30mm, 431, 216, 192},
+            SpecRow{td2x2x::_40x40mm, 432, 296, 272},
+            SpecRow{td2x2x::_40x50mm, 433, 296, 352},
+            SpecRow{td2x2x::_40x60mm, 434, 296, 432},
+            SpecRow{td2x2x::_50x30mm, 435, 376, 192},
+            SpecRow{td2x2x::_60x60mm, 437, 448, 432},
+        };
+        for (const auto& row : rows) {
+            const auto f = row.blob.fields();
+            REQUIRE(f.paperSize == row.id);
+            REQUIRE(f.imageAreaWidthRes == row.printAreaWidth);
+            REQUIRE(f.imageAreaLengthRes == row.printAreaLength);
+            // Length offset column, constant per family.
+            REQUIRE(f.lengthOffsetDots1 == 24);
+            REQUIRE(f.lengthOffsetDots2 == 24);
+        }
+    }
+
+    SECTION("Td2x3x at 300 dpi") {
+        const std::array rows{
+            SpecRow{td2x3x::_51x26mm, 422, 564, 231},
+            SpecRow{td2x3x::_30x30mm, 431, 318, 283},
+            SpecRow{td2x3x::_40x40mm, 432, 436, 401},
+            SpecRow{td2x3x::_40x50mm, 433, 436, 519},
+            SpecRow{td2x3x::_40x60mm, 434, 436, 638},
+        };
+        for (const auto& row : rows) {
+            const auto f = row.blob.fields();
+            REQUIRE(f.paperSize == row.id);
+            REQUIRE(f.imageAreaWidthRes == row.printAreaWidth);
+            REQUIRE(f.imageAreaLengthRes == row.printAreaLength);
+            REQUIRE(f.lengthOffsetDots1 == 35);
+            REQUIRE(f.lengthOffsetDots2 == 35);
+        }
+    }
+
+    SECTION("Continuous tape carries no label geometry") {
+        for (const auto& blob : {td2x2x::_57mm, td2x2x::_58mm, td2x3x::_57mm, td2x3x::_58mm}) {
+            const auto f = blob.fields();
+            REQUIRE(f.paperLengthMm == 0);
+            REQUIRE(f.imageAreaLengthRes == 0);
+            REQUIRE(f.lblPitchDot == 0);
+            REQUIRE(f.mediaClass == 0);
+        }
+    }
+}
+
+TEST_CASE("getMediaInfoForMedia - DieCutLabels 30mm width", "[media]") {
+
+    SECTION("Td2x2x - 30x30mm") {
+        auto result = getMediaInfoForMedia(
+            ModelFamily::Td2x2x, 30 * mm, 30 * mm, MediaType::DieCutLabels);
+        REQUIRE(result == td2x2x::_30x30mm);
+    }
+
+    SECTION("Td2x3x - 30x30mm") {
+        auto result = getMediaInfoForMedia(
+            ModelFamily::Td2x3x, 30 * mm, 30 * mm, MediaType::DieCutLabels);
+        REQUIRE(result == td2x3x::_30x30mm);
+    }
+
+    SECTION("30x30mm blob is not the 40x40mm blob") {
+        REQUIRE_FALSE(td2x2x::_30x30mm == td2x2x::_40x40mm);
+        auto result = getMediaInfoForMedia(
+            ModelFamily::Td2x2x, 30 * mm, 30 * mm, MediaType::DieCutLabels);
+        REQUIRE_FALSE(result == td2x2x::_40x40mm);
+    }
+}
+
+TEST_CASE("getMediaInfoForMedia - length is not ignored above 40mm width", "[media]") {
+
+    SECTION("50mm wide and 20mm long fits the 50x30mm label") {
+        auto result = getMediaInfoForMedia(
+            ModelFamily::Td2x2x, 50 * mm, 20 * mm, MediaType::DieCutLabels);
+        REQUIRE(result == td2x2x::_50x30mm);
+    }
+
+    SECTION("50mm wide and 55mm long does not fit 50x30mm") {
+        auto result = getMediaInfoForMedia(
+            ModelFamily::Td2x2x, 50 * mm, 55 * mm, MediaType::DieCutLabels);
+        REQUIRE(result == td2x2x::_60x60mm);
+    }
+
+    SECTION("51x30mm has no own media and uses the next label that fits") {
+        auto result = getMediaInfoForMedia(
+            ModelFamily::Td2x2x, 51 * mm, 30 * mm, MediaType::DieCutLabels);
+        REQUIRE(result == td2x2x::_60x60mm);
+    }
+}
+
+TEST_CASE("MediaInfoFields - every blob has a distinct identity", "[media][MediaInfoFields]") {
+    // Guards against a copied blob. td2x2x/51x30mm.bin was a byte copy of
+    // td2x2x/30x30mm.bin and announced the wrong size.
+    const std::array blobs{
+        td2x2x::_30x30mm, td2x2x::_40x40mm, td2x2x::_40x50mm, td2x2x::_40x60mm,
+        td2x2x::_50x30mm, td2x2x::_51x26mm, td2x2x::_57mm, td2x2x::_58mm,
+        td2x2x::_60x60mm,
+    };
+
+    for (std::size_t i = 0; i < blobs.size(); ++i) {
+        for (std::size_t j = i + 1; j < blobs.size(); ++j) {
+            REQUIRE_FALSE(blobs[i] == blobs[j]);
+            REQUIRE(blobs[i].fields().paperSize != blobs[j].fields().paperSize);
+        }
+    }
+}
+
+TEST_CASE("printInfoMedia - ESC i z agrees with the ESC i U record", "[media][printInfo]") {
+    // The printer compares the {n3}/{n4} of ESC i z against the media record of ESC i U.
+    // A request that is smaller than the selected label must not leak into ESC i z.
+
+    SECTION("die-cut request smaller than the selected label") {
+        const auto info = getMediaInfoForMedia(
+            ModelFamily::Td2x2x, 30 * mm, 20 * mm, MediaType::DieCutLabels);
+        REQUIRE(info == td2x2x::_30x30mm);
+
+        const auto pi = printInfoMedia(info, MediaType::DieCutLabels, 20 * mm);
+        REQUIRE(pi.width == info.fields().paperWidth);
+        REQUIRE(pi.length == info.fields().paperLengthMm);
+        REQUIRE(pi.length == 30);        // the label, not the requested 20
+        REQUIRE(pi.lengthValid);
+    }
+
+    SECTION("every die-cut medium reports its own dimensions") {
+        for (const auto& blob : {td2x2x::_30x30mm, td2x2x::_40x40mm, td2x2x::_40x50mm,
+                                 td2x2x::_40x60mm, td2x2x::_50x30mm, td2x2x::_51x26mm,
+                                 td2x2x::_60x60mm}) {
+            const auto f = blob.fields();
+            const auto pi = printInfoMedia(blob, MediaType::DieCutLabels, 1 * mm);
+            REQUIRE(pi.width == f.paperWidth);
+            REQUIRE(pi.length == f.paperLengthMm);
+        }
+    }
+
+    SECTION("continuous request narrower than the tape reports the tape width") {
+        const auto info = getMediaInfoForMedia(
+            ModelFamily::Td2x2x, 50 * mm, 100 * mm, MediaType::ContinuousLengthTape);
+        REQUIRE(info == td2x2x::_57mm);
+
+        const auto pi = printInfoMedia(info, MediaType::ContinuousLengthTape, 100 * mm);
+        REQUIRE(pi.width == 57);         // the tape, not the requested 50
+        REQUIRE(pi.length == 100);       // the job length
+        REQUIRE(pi.lengthValid);
+    }
+
+    SECTION("continuous length above 255mm cannot use one byte") {
+        const auto pi = printInfoMedia(td2x2x::_58mm, MediaType::ContinuousLengthTape, 1000 * mm);
+        REQUIRE(pi.width == 58);
+        REQUIRE_FALSE(pi.lengthValid);
+        REQUIRE(pi.length == 0);         // never a truncated 1000 & 0xFF == 232
+    }
+
+    SECTION("continuous length at the one-byte boundary") {
+        const auto at = printInfoMedia(td2x2x::_58mm, MediaType::ContinuousLengthTape, 255 * mm);
+        REQUIRE(at.lengthValid);
+        REQUIRE(at.length == 255);
+        const auto over = printInfoMedia(td2x2x::_58mm, MediaType::ContinuousLengthTape, 256 * mm);
+        REQUIRE_FALSE(over.lengthValid);
+    }
+}
+
 TEST_CASE("getMediaInfoForMedia - Default fallback", "[media]") {
 
     SECTION("Unknown media type returns default") {
@@ -292,9 +460,11 @@ TEST_CASE("getMediaInfoForMedia - Default fallback", "[media]") {
     }
 
     SECTION("Out of range dimensions returns default") {
+        // No die-cut media is larger than 60x60mm. Continuous tape is not a
+        // substitute for a die-cut request, so the lookup must report none.
         auto result = getMediaInfoForMedia(
             ModelFamily::Td2x2x, 70 * mm, 70 * mm, MediaType::DieCutLabels);
-        REQUIRE(result == td2x2x::_58mm);
+        REQUIRE(result == none);
     }
 }
 

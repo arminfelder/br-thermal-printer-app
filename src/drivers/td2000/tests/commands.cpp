@@ -245,7 +245,8 @@ TEST_CASE("PrintInformation::get() returns correct command", "[PrintInformation]
         commands::PrintInformation cmd(info);
         auto result = cmd.get();
 
-        REQUIRE(result.size() == 3);
+        // ESC i z is the 3-byte header plus the 10-byte PrintInfoFields payload.
+        REQUIRE(result.size() == 3 + sizeof(types::PrintInfoFields));
     }
 
     SECTION("Contains correct command header") {
@@ -263,7 +264,8 @@ TEST_CASE("PrintInformation::get() returns correct command", "[PrintInformation]
         commands::PrintInformation cmd(info);
         auto result = cmd.get();
 
-        std::vector<uint8_t> expected = {0x1B, 0x69, 0x7A};
+        std::vector<uint8_t> expected = {0x1B, 0x69, 0x7A,
+                                         0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
         REQUIRE(result == expected);
     }
 
@@ -302,7 +304,10 @@ TEST_CASE("PrintInformation::get() returns correct command", "[PrintInformation]
         commands::PrintInformation cmd(info);
         auto result = cmd.get();
 
-        REQUIRE(result.size() == 3);
+        REQUIRE(result.size() == 3 + sizeof(types::PrintInfoFields));
+        REQUIRE(result[3] == info.validFields);
+        REQUIRE(result[4] == info.mediaType);
+        REQUIRE(result[5] == info.mediaWidth);
     }
 }
 
