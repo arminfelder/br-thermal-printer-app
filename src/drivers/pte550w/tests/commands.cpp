@@ -244,14 +244,15 @@ TEST_CASE("resolutions - all variants are 180 dpi", "[pte550w][config]")
 }
 
 // ---------------------------------------------------------------------------
-// minFeedMarginDots – spec §2.6: 14 dots at 180 dpi
+// minFeedMargin – spec §2.6: 14 dots at 180 dpi
 // ---------------------------------------------------------------------------
 
-TEST_CASE("minFeedMarginDots - 14 dots for all variants", "[pte550w][config]")
+TEST_CASE("minFeedMargin - 14 dots for all variants", "[pte550w][config]")
 {
-    REQUIRE(minFeedMarginDots.at(types::ModelVariant::PtE550W)  == 14);
-    REQUIRE(minFeedMarginDots.at(types::ModelVariant::PtP750W)  == 14);
-    REQUIRE(minFeedMarginDots.at(types::ModelVariant::PtP710BT) == 14);
+    using util::units::dot;
+    REQUIRE(minFeedMargin.at(types::ModelVariant::PtE550W)  == 14 * dot);
+    REQUIRE(minFeedMargin.at(types::ModelVariant::PtP750W)  == 14 * dot);
+    REQUIRE(minFeedMargin.at(types::ModelVariant::PtP710BT) == 14 * dot);
 }
 
 // ---------------------------------------------------------------------------

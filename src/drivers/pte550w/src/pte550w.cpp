@@ -27,6 +27,7 @@ extern "C" {
 }
 
 #include "util.h"
+#include "units.h"
 
 namespace drivers::pte550w
 {
@@ -195,7 +196,8 @@ namespace drivers::pte550w
                              | static_cast<uint8_t>(types::PrintInfoFlags::pi_width)
                              | static_cast<uint8_t>(types::PrintInfoFlags::pi_kind);
             info.mediaType   = static_cast<uint8_t>(types::MediaType::LaminatedTape);
-            info.mediaWidth  = static_cast<uint8_t>(options->media.size_width / 100);
+            const auto mediaWidth = util::units::fromPwg(options->media.size_width);
+            info.mediaWidth  = static_cast<uint8_t>(util::units::toWholeMillimetres(mediaWidth));
             info.mediaLength = 0;
 
             info.pageType    = (pageNumber == 0) ? types::PageType::startingPage
@@ -244,12 +246,14 @@ namespace drivers::pte550w
 
             // 7. ESC i d — Specify margin amount.
             //    Minimum 14 dots at 180 dpi, 28 dots at 360 dpi (spec §2.3.3).
-            uint8_t feedMargin = minFeedMarginDots.at(jobData->variant);
+            util::units::DotCount feedMargin = minFeedMargin.at(jobData->variant);
             if (options->header.HWResolution[0] == 360)
-                feedMargin *= 2;
+                feedMargin = feedMargin * 2;
 
             if (!util::writeToDevice(
-                    commands::SpecifyMarginAmount{feedMargin, 0}.get(), device, jobId))
+                    commands::SpecifyMarginAmount{
+                        feedMargin.numerical_value_in(util::units::dot), 0}.get(),
+                    device, jobId))
                 return false;
 
             // 8. M — Select compression mode.
@@ -698,10 +702,10 @@ namespace drivers::pte550w
             {
                 driverData->media_ready[0].size_width  = pwg->width;
                 driverData->media_ready[0].size_length = pwg->length;
-                driverData->media_ready[0].bottom_margin = margins.at(variant).bottom;
-                driverData->media_ready[0].left_margin   = margins.at(variant).left;
-                driverData->media_ready[0].right_margin  = margins.at(variant).right;
-                driverData->media_ready[0].top_margin    = margins.at(variant).top;
+                driverData->media_ready[0].bottom_margin = util::units::toPwg(margins.at(variant).bottom);
+                driverData->media_ready[0].left_margin   = util::units::toPwg(margins.at(variant).left);
+                driverData->media_ready[0].right_margin  = util::units::toPwg(margins.at(variant).right);
+                driverData->media_ready[0].top_margin    = util::units::toPwg(margins.at(variant).top);
                 papplCopyString(driverData->media_ready[0].source,
                                 driverData->source[0],
                                 sizeof(driverData->media_ready[0].source));
@@ -722,10 +726,10 @@ namespace drivers::pte550w
             {
                 driverData->media_default.size_width  = pwg->width;
                 driverData->media_default.size_length = pwg->length;
-                driverData->media_default.bottom_margin = margins.at(variant).bottom;
-                driverData->media_default.left_margin   = margins.at(variant).left;
-                driverData->media_default.right_margin  = margins.at(variant).right;
-                driverData->media_default.top_margin    = margins.at(variant).top;
+                driverData->media_default.bottom_margin = util::units::toPwg(margins.at(variant).bottom);
+                driverData->media_default.left_margin   = util::units::toPwg(margins.at(variant).left);
+                driverData->media_default.right_margin  = util::units::toPwg(margins.at(variant).right);
+                driverData->media_default.top_margin    = util::units::toPwg(margins.at(variant).top);
                 papplCopyString(driverData->media_default.type,
                                 driverData->type[0],
                                 sizeof(driverData->media_default.type));

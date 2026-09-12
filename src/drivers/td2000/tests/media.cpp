@@ -32,6 +32,10 @@ using namespace drivers::td2000;
 using namespace drivers::td2000::media;
 using namespace drivers::td2000::types;
 
+using mp_units::si::unit_symbols::mm;
+// PAPPL supplies media dimensions in hundredths of a millimetre.
+using util::units::fromPwg;
+
 // ---------------------------------------------------------------------------
 // MediaInfoFields parsing tests
 // ---------------------------------------------------------------------------
@@ -170,27 +174,27 @@ TEST_CASE("AdditionalMediaInformation - different media produces different paylo
 
 TEST_CASE("getMediaInfoForMedia - ContinuousLengthTape", "[media]") {
 
-    SECTION("Td2x2x family - width <= 5700 returns 57mm") {
+    SECTION("Td2x2x family - width <= 57mm returns 57mm") {
         auto result = getMediaInfoForMedia(
-            ModelFamily::Td2x2x, 5700, 0, MediaType::ContinuousLengthTape);
+            ModelFamily::Td2x2x, 57 * mm, 0 * mm, MediaType::ContinuousLengthTape);
         REQUIRE(result == td2x2x::_57mm);
     }
 
-    SECTION("Td2x3x family - width <= 5700 returns 57mm") {
+    SECTION("Td2x3x family - width <= 57mm returns 57mm") {
         auto result = getMediaInfoForMedia(
-            ModelFamily::Td2x3x, 5700, 0, MediaType::ContinuousLengthTape);
+            ModelFamily::Td2x3x, 57 * mm, 0 * mm, MediaType::ContinuousLengthTape);
         REQUIRE(result == td2x3x::_57mm);
     }
 
-    SECTION("Td2x2x family - width > 5700 returns 58mm") {
+    SECTION("Td2x2x family - width > 57mm returns 58mm") {
         auto result = getMediaInfoForMedia(
-            ModelFamily::Td2x2x, 5800, 0, MediaType::ContinuousLengthTape);
+            ModelFamily::Td2x2x, 58 * mm, 0 * mm, MediaType::ContinuousLengthTape);
         REQUIRE(result == td2x2x::_58mm);
     }
 
-    SECTION("Td2x3x family - width > 5700 returns 58mm") {
+    SECTION("Td2x3x family - width > 57mm returns 58mm") {
         auto result = getMediaInfoForMedia(
-            ModelFamily::Td2x3x, 5800, 0, MediaType::ContinuousLengthTape);
+            ModelFamily::Td2x3x, 58 * mm, 0 * mm, MediaType::ContinuousLengthTape);
         REQUIRE(result == td2x3x::_58mm);
     }
 }
@@ -199,37 +203,37 @@ TEST_CASE("getMediaInfoForMedia - DieCutLabels 40mm width", "[media]") {
 
     SECTION("Td2x2x - 40x40mm") {
         auto result = getMediaInfoForMedia(
-            ModelFamily::Td2x2x, 4000, 4000, MediaType::DieCutLabels);
+            ModelFamily::Td2x2x, 40 * mm, 40 * mm, MediaType::DieCutLabels);
         REQUIRE(result == td2x2x::_40x40mm);
     }
 
     SECTION("Td2x3x - 40x40mm") {
         auto result = getMediaInfoForMedia(
-            ModelFamily::Td2x3x, 4000, 4000, MediaType::DieCutLabels);
+            ModelFamily::Td2x3x, 40 * mm, 40 * mm, MediaType::DieCutLabels);
         REQUIRE(result == td2x3x::_40x40mm);
     }
 
     SECTION("Td2x2x - 40x50mm") {
         auto result = getMediaInfoForMedia(
-            ModelFamily::Td2x2x, 4000, 5000, MediaType::DieCutLabels);
+            ModelFamily::Td2x2x, 40 * mm, 50 * mm, MediaType::DieCutLabels);
         REQUIRE(result == td2x2x::_40x50mm);
     }
 
     SECTION("Td2x3x - 40x50mm") {
         auto result = getMediaInfoForMedia(
-            ModelFamily::Td2x3x, 4000, 5000, MediaType::DieCutLabels);
+            ModelFamily::Td2x3x, 40 * mm, 50 * mm, MediaType::DieCutLabels);
         REQUIRE(result == td2x3x::_40x50mm);
     }
 
     SECTION("Td2x2x - 40x60mm") {
         auto result = getMediaInfoForMedia(
-            ModelFamily::Td2x2x, 4000, 6000, MediaType::DieCutLabels);
+            ModelFamily::Td2x2x, 40 * mm, 60 * mm, MediaType::DieCutLabels);
         REQUIRE(result == td2x2x::_40x60mm);
     }
 
     SECTION("Td2x3x - 40x60mm") {
         auto result = getMediaInfoForMedia(
-            ModelFamily::Td2x3x, 4000, 6000, MediaType::DieCutLabels);
+            ModelFamily::Td2x3x, 40 * mm, 60 * mm, MediaType::DieCutLabels);
         REQUIRE(result == td2x3x::_40x60mm);
     }
 }
@@ -238,13 +242,13 @@ TEST_CASE("getMediaInfoForMedia - DieCutLabels 50mm width", "[media]") {
 
     SECTION("Td2x2x - 50x30mm") {
         auto result = getMediaInfoForMedia(
-            ModelFamily::Td2x2x, 5000, 3000, MediaType::DieCutLabels);
+            ModelFamily::Td2x2x, 50 * mm, 30 * mm, MediaType::DieCutLabels);
         REQUIRE(result == td2x2x::_50x30mm);
     }
 
     SECTION("Td2x3x - 50x30mm") {
         auto result = getMediaInfoForMedia(
-            ModelFamily::Td2x3x, 5000, 3000, MediaType::DieCutLabels);
+            ModelFamily::Td2x3x, 50 * mm, 30 * mm, MediaType::DieCutLabels);
         REQUIRE(result == td2x3x::_50x30mm);
     }
 }
@@ -253,13 +257,13 @@ TEST_CASE("getMediaInfoForMedia - DieCutLabels 51mm width", "[media]") {
 
     SECTION("Td2x2x - 51x26mm") {
         auto result = getMediaInfoForMedia(
-            ModelFamily::Td2x2x, 5100, 2600, MediaType::DieCutLabels);
+            ModelFamily::Td2x2x, 51 * mm, 26 * mm, MediaType::DieCutLabels);
         REQUIRE(result == td2x2x::_51x26mm);
     }
 
     SECTION("Td2x3x - 51x26mm") {
         auto result = getMediaInfoForMedia(
-            ModelFamily::Td2x3x, 5100, 2600, MediaType::DieCutLabels);
+            ModelFamily::Td2x3x, 51 * mm, 26 * mm, MediaType::DieCutLabels);
         REQUIRE(result == td2x3x::_51x26mm);
     }
 }
@@ -268,13 +272,13 @@ TEST_CASE("getMediaInfoForMedia - DieCutLabels 60mm width", "[media]") {
 
     SECTION("Td2x2x - 60x60mm") {
         auto result = getMediaInfoForMedia(
-            ModelFamily::Td2x2x, 6000, 6000, MediaType::DieCutLabels);
+            ModelFamily::Td2x2x, 60 * mm, 60 * mm, MediaType::DieCutLabels);
         REQUIRE(result == td2x2x::_60x60mm);
     }
 
     SECTION("Td2x3x - 60x60mm") {
         auto result = getMediaInfoForMedia(
-            ModelFamily::Td2x3x, 6000, 6000, MediaType::DieCutLabels);
+            ModelFamily::Td2x3x, 60 * mm, 60 * mm, MediaType::DieCutLabels);
         REQUIRE(result == td2x3x::_60x60mm);
     }
 }
@@ -283,48 +287,48 @@ TEST_CASE("getMediaInfoForMedia - Default fallback", "[media]") {
 
     SECTION("Unknown media type returns default") {
         auto result = getMediaInfoForMedia(
-            ModelFamily::Td2x2x, 1000, 1000, MediaType::NoMedia);
+            ModelFamily::Td2x2x, 10 * mm, 10 * mm, MediaType::NoMedia);
         REQUIRE(result == none);
     }
 
     SECTION("Out of range dimensions returns default") {
         auto result = getMediaInfoForMedia(
-            ModelFamily::Td2x2x, 7000, 7000, MediaType::DieCutLabels);
+            ModelFamily::Td2x2x, 70 * mm, 70 * mm, MediaType::DieCutLabels);
         REQUIRE(result == td2x2x::_58mm);
     }
 }
 
 TEST_CASE("getMediaInfoForMedia - Boundary conditions", "[media][boundary]") {
 
-    SECTION("ContinuousTape - width exactly 5700") {
+    SECTION("ContinuousTape - width exactly 57mm") {
         auto result = getMediaInfoForMedia(
-            ModelFamily::Td2x2x, 5700, 0, MediaType::ContinuousLengthTape);
+            ModelFamily::Td2x2x, 57 * mm, 0 * mm, MediaType::ContinuousLengthTape);
         REQUIRE(result == td2x2x::_57mm);
     }
 
-    SECTION("ContinuousTape - width just above 5700") {
+    SECTION("ContinuousTape - width just above 57mm") {
         auto result = getMediaInfoForMedia(
-            ModelFamily::Td2x2x, 5701, 0, MediaType::ContinuousLengthTape);
+            ModelFamily::Td2x2x, fromPwg(5701), 0 * mm, MediaType::ContinuousLengthTape);
         REQUIRE(result == td2x2x::_58mm);
     }
 
-    SECTION("DieCut - width exactly at boundary 4000") {
+    SECTION("DieCut - width exactly at boundary 40mm") {
         auto result = getMediaInfoForMedia(
-            ModelFamily::Td2x2x, 4000, 4000, MediaType::DieCutLabels);
+            ModelFamily::Td2x2x, 40 * mm, 40 * mm, MediaType::DieCutLabels);
         REQUIRE(result == td2x2x::_40x40mm);
     }
 
-    SECTION("DieCut - width just above 4000") {
+    SECTION("DieCut - width just above 40mm") {
         auto result = getMediaInfoForMedia(
-            ModelFamily::Td2x2x, 4001, 3000, MediaType::DieCutLabels);
+            ModelFamily::Td2x2x, fromPwg(4001), 30 * mm, MediaType::DieCutLabels);
         REQUIRE(result == td2x2x::_50x30mm);
     }
 
-    SECTION("DieCut - length boundary at 4000 vs 4001") {
+    SECTION("DieCut - length boundary at 40mm vs 40.01mm") {
         auto at_boundary = getMediaInfoForMedia(
-            ModelFamily::Td2x2x, 4000, 4000, MediaType::DieCutLabels);
+            ModelFamily::Td2x2x, 40 * mm, 40 * mm, MediaType::DieCutLabels);
         auto above_boundary = getMediaInfoForMedia(
-            ModelFamily::Td2x2x, 4000, 4001, MediaType::DieCutLabels);
+            ModelFamily::Td2x2x, 40 * mm, fromPwg(4001), MediaType::DieCutLabels);
 
         REQUIRE(at_boundary == td2x2x::_40x40mm);
         REQUIRE(above_boundary == td2x2x::_40x50mm);

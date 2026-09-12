@@ -28,6 +28,7 @@
 #include <vector>
 #include <pappl/pappl.h>
 #include "media_generated.inc"
+#include "units.h"
 
 namespace drivers::td2000
 {
@@ -316,11 +317,13 @@ namespace drivers::td2000
             int bytesPerLine = 56;
         };
 
+        // PAPPL reads pappl_media_col_s margins as hundredths of a millimetre,
+        // not as printer dots. Feed margins sent by ESC i d are dots; see minFeedMargin.
         struct Margins {
-            uint8_t left = 0;
-            uint8_t right = 0;
-            uint8_t top = 0;
-            uint8_t bottom = 0;
+            util::units::MediaSize left{};
+            util::units::MediaSize right{};
+            util::units::MediaSize top{};
+            util::units::MediaSize bottom{};
         };
 
     }
@@ -649,7 +652,11 @@ namespace drivers::td2000
 
     namespace media
     {
-        types::MediaInfo getMediaInfoForMedia(types::ModelFamily family, int width, int length, types::MediaType type ) noexcept;
+        // width and length are the media dimensions as PAPPL supplies them.
+        types::MediaInfo getMediaInfoForMedia(types::ModelFamily family,
+                                              util::units::MediaSize width,
+                                              util::units::MediaSize length,
+                                              types::MediaType type) noexcept;
 
         constexpr types::MediaInfo none{
             .raw =  {}
@@ -725,25 +732,31 @@ namespace drivers::td2000
         {types::ModelFamily::Td2x3x, 84},
     };
 
+    // TODO: left/right were written as bare 3 with no unit stated. PAPPL takes
+    // hundredths of a millimetre, so this is 0.03 mm. If 3 printer dots was meant,
+    // the values are 37 (203 dpi) and 25 (300 dpi). Value kept as-is pending a
+    // decision, because changing it changes the printable area.
     inline const std::map<types::ModelFamily, types::Margins> margins{
         {types::ModelFamily::Td2x2x, {
-            3,
-            3,
-            0,
-            0
+            util::units::fromPwg(3),
+            util::units::fromPwg(3),
+            util::units::fromPwg(0),
+            util::units::fromPwg(0)
         }},
         {types::ModelFamily::Td2x3x, {
-            3,
-            3,
-            0,
-            0
+            util::units::fromPwg(3),
+            util::units::fromPwg(3),
+            util::units::fromPwg(0),
+            util::units::fromPwg(0)
         }}
     };
 
-    // Minimum feed margin in dots for continuous tape per spec §2.6; die-cut must be 0
-    inline const std::map<types::ModelFamily, uint8_t> minFeedMarginDots{
-        {types::ModelFamily::Td2x2x, 24},  // 203 dpi
-        {types::ModelFamily::Td2x3x, 35},  // 300 dpi
+    // Minimum feed margin for continuous tape per spec §2.6; die-cut must be 0.
+    // ESC i d carries dots, unlike the PAPPL margins above which are hundredths of
+    // a millimetre. Spec values, not derived: 3 mm at 203 dpi truncates to 23 dots.
+    inline const std::map<types::ModelFamily, util::units::DotCount> minFeedMargin{
+        {types::ModelFamily::Td2x2x, 24 * util::units::dot},  // 203 dpi
+        {types::ModelFamily::Td2x3x, 35 * util::units::dot},  // 300 dpi
     };
 
     constexpr std::array<const char*,12> defaultMedia{
