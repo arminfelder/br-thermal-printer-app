@@ -393,7 +393,10 @@ namespace drivers::pte550w
 #ifdef __clang__
 #pragma clang unsafe_buffer_usage end
 #endif
-            const auto mirroredLine = util::buildHeadLine(lineData, kPrinterBytes);
+            const auto mirroredLine = util::buildHeadLine(
+                lineData,
+                static_cast<size_t>(options->header.cupsWidth),
+                kPrinterBytes * 8);
             const auto compressed = util::compressLine(mirroredLine);
             const commands::RasterGraphicsTransfer rgt{
                 static_cast<int>(compressed.size()), compressed};

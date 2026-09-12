@@ -60,21 +60,40 @@ namespace util
         return reversed;
     }
     std::vector<uint8_t> buildHeadLine(const std::span<const uint8_t> &delivered,
-                                       const size_t headBytes)
+                                       const size_t deliveredDots,
+                                       const size_t headDots)
     {
-        const auto usable = std::min(delivered.size(), headBytes);
+        const auto headBytes = (headDots + 7) / 8;
+        const auto availableDots = std::min(deliveredDots, delivered.size() * 8);
 
-        // Dots that the media does not cover are on the right of the tape. Mirroring moves
-        // them to the front of the line.
-        std::vector<uint8_t> line(headBytes - usable, 0);
-        line.reserve(headBytes);
+        // The media sits in the middle of the print head. If it is narrower, the blank dots
+        // are equal on the two sides. If it is wider, the same count is cut from each side.
+        size_t srcStart = 0;
+        size_t dstStart = 0;
+        size_t copyDots = availableDots;
+        if (availableDots < headDots)
+        {
+            dstStart = (headDots - availableDots) / 2;
+        }
+        else
+        {
+            srcStart = (availableDots - headDots) / 2;
+            copyDots = headDots;
+        }
 
-        const auto mirrored = mirrorLine(delivered.first(usable));
-        line.insert(line.end(), mirrored.begin(), mirrored.end());
+        std::vector<uint8_t> head(headBytes, 0);
+        for (size_t i = 0; i < copyDots; ++i)
+        {
+            const auto src = srcStart + i;
+            const auto dst = dstStart + i;
+            if (delivered[src / 8] & static_cast<uint8_t>(0x80U >> (src % 8)))
+            {
+                head[dst / 8] |= static_cast<uint8_t>(0x80U >> (dst % 8));
+            }
+        }
 
-        return line;
+        return mirrorLine(head);
     }
-
 
     std::vector<uint8_t> compressLine(const std::vector<uint8_t>& data)
     {
