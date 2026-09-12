@@ -170,6 +170,18 @@ namespace drivers::td2000
             //   4. SpecifyMarginAmount         (ESC i d)
             //   5. SelectCompressionMode       (M)
 
+            // Warn once per page, not per raster line, when the media is narrower than the
+            // print head. The line gets zero padding, thus the operator sees blank tape
+            // where an image can be expected.
+            if (const auto deliveredBytes = static_cast<size_t>(options->header.cupsBytesPerLine);
+                deliveredBytes < static_cast<size_t>(jobData->bytesPerLine))
+            {
+                papplLogJob(job, PAPPL_LOGLEVEL_WARN,
+                            "Raster line is %zu bytes but the print head is %d; "
+                            "media is narrower than the head, line will be padded",
+                            deliveredBytes, jobData->bytesPerLine);
+            }
+
             // 1. Spec §4 p.27-28: ESC i U (1Bh 69h 55h 77h 01h + 127 bytes) —
             //    Additional media information command; updates the printer's media info.
             //    May be skipped if media has not changed since the last print.
@@ -364,15 +376,21 @@ namespace drivers::td2000
             }
 
             const auto bytesPerLine = jobData->bytesPerLine;
+
+            // Size the span from what PAPPL allocated, not from the head width. PAPPL
+            // calculates cupsBytesPerLine from the media geometry, thus media that is
+            // narrower than the head gives a shorter buffer. buildHeadLine clamps the line
+            // and then pads it back to the head width.
+            const auto deliveredBytes = static_cast<size_t>(options->header.cupsBytesPerLine);
 #ifdef __clang__
 #pragma clang unsafe_buffer_usage begin
 #endif
-            const std::span lineData(pixels, static_cast<size_t>(bytesPerLine));
+            const std::span lineData(pixels, deliveredBytes);
 #ifdef __clang__
 #pragma clang unsafe_buffer_usage end
 #endif
 
-            const auto mirroredLine = util::mirrorLine(lineData);
+            const auto mirroredLine = util::buildHeadLine(lineData, static_cast<size_t>(bytesPerLine));
 
             // Spec §4 p.33: g (67h 00h {n} {d1..dn}) — Raster graphics transfer.
             // {n} = number of bytes: 56 for Td2x2x (203 dpi), 84 for Td2x3x (300 dpi)
