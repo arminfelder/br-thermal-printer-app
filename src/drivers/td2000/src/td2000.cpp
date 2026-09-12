@@ -390,7 +390,10 @@ namespace drivers::td2000
 #pragma clang unsafe_buffer_usage end
 #endif
 
-            const auto mirroredLine = util::buildHeadLine(lineData, static_cast<size_t>(bytesPerLine));
+            const auto mirroredLine = util::buildHeadLine(
+                lineData,
+                static_cast<size_t>(options->header.cupsWidth),
+                static_cast<size_t>(bytesPerLine) * 8);
 
             // Spec §4 p.33: g (67h 00h {n} {d1..dn}) — Raster graphics transfer.
             // {n} = number of bytes: 56 for Td2x2x (203 dpi), 84 for Td2x3x (300 dpi)

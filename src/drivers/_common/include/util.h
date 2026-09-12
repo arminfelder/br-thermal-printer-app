@@ -76,17 +76,19 @@ namespace util
 
     // Turns one PAPPL raster line into the mirrored, head-width line the printer expects.
     //
-    // `delivered` must be sized from header.cupsBytesPerLine, which is how many bytes PAPPL
-    // allocated. Do not assume that this equals the print head width. PAPPL calculates
-    // cupsBytesPerLine from the media geometry, thus narrow media gives a shorter line. A
-    // 12 mm tape at 180 dpi is 85 dots = 11 bytes, against a 16-byte head. If you read the
-    // full head width from that buffer, the read is out of bounds.
+    // `delivered` must be sized from header.cupsBytesPerLine and `deliveredDots` from
+    // header.cupsWidth. Do not assume that either equals the print head. PAPPL calculates
+    // both from the media geometry, thus narrow media gives a shorter line. A 12 mm tape at
+    // 180 dpi is 85 dots against a 16-byte head. If you read the full head width from that
+    // buffer, the read is out of bounds.
     //
-    // If the line is shorter than the head, the missing dots are on the right of the tape.
-    // Mirroring moves them to the front, thus the result has zero padding at the front. If
-    // the line is longer, the surplus is padding that PAPPL added, and it is discarded.
+    // The media is centred below the print head, thus the line is centred in the head and
+    // the blank margins are equal on the two sides. Raster spec 2.3.5 gives the margins:
+    // a 30 x 30 mm label has 116 blank pins, 216 print area pins and 116 blank pins. If the
+    // media is wider than the head, the same number of dots is removed from each side.
     std::vector<uint8_t> buildHeadLine(const std::span<const uint8_t> &delivered,
-                                       size_t headBytes);
+                                       size_t deliveredDots,
+                                       size_t headDots);
 }
 
 #endif //BR_THERMAL_UTIL_H
