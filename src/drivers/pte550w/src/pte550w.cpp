@@ -635,7 +635,14 @@ namespace drivers::pte550w
         if (!driverData)
             return false;
 
-        const auto variant = modelVariantMap.at(model);
+        const auto variantIt = modelVariantMap.find(model);
+        if (variantIt == modelVariantMap.end())
+        {
+            // An unknown model must give a clean IPP failure, not an exception that
+            // terminates the server.
+            return false;
+        }
+        const auto variant = variantIt->second;
         const std::string makeAndModel = std::format("Brother {}", model);
 
         driverData->printfile_cb  = callbacks::print;

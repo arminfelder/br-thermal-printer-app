@@ -747,7 +747,14 @@ namespace drivers::td2000
             return false;
         }
 
-        const auto family = modelFamilyMap.at(model);
+        const auto familyIt = modelFamilyMap.find(model);
+        if (familyIt == modelFamilyMap.end())
+        {
+            // An unknown model must give a clean IPP failure, not an exception that
+            // terminates the server.
+            return false;
+        }
+        const auto family = familyIt->second;
         const std::string makeAndModel = std::format("Brother {}", model);
 
         std::vector<const char *> media{defaultMedia.begin(), defaultMedia.end()};
