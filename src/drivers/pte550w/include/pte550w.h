@@ -24,6 +24,7 @@
 #include <type_traits>
 #include <vector>
 #include <pappl/pappl.h>
+#include "units.h"
 
 // ---------------------------------------------------------------------------
 // PT-E550W / PT-P750W / PT-P710BT  –  Raster Command Reference v1.02
@@ -271,11 +272,13 @@ namespace drivers::pte550w
             int          bytesPerLine    = 16;     // 128 dots / 8 = 16 bytes (fixed)
         };
 
+        // PAPPL reads pappl_media_col_s margins as hundredths of a millimetre,
+        // not as printer dots. Feed margins sent by ESC i d are dots; see minFeedMargin.
         struct Margins {
-            uint8_t left   = 0;
-            uint8_t right  = 0;
-            uint8_t top    = 0;
-            uint8_t bottom = 0;
+            util::units::MediaSize left{};
+            util::units::MediaSize right{};
+            util::units::MediaSize top{};
+            util::units::MediaSize bottom{};
         };
     }
 
@@ -538,21 +541,22 @@ namespace drivers::pte550w
         {types::ModelVariant::PtP710BT,  16},
     };
 
-    // Left/right/top/bottom margins (in dots).
+    // Left/right/top/bottom margins, in PAPPL's hundredths of a millimetre.
     // These printers use TZe tape with symmetric side margins; top/bottom come from
     // the feed margin setting sent via ESC i d (spec §4 p.30, §2.6).
     inline const std::map<types::ModelVariant, types::Margins> margins {
-        {types::ModelVariant::PtE550W,  {0, 0, 0, 0}},
-        {types::ModelVariant::PtP750W,  {0, 0, 0, 0}},
-        {types::ModelVariant::PtP710BT, {0, 0, 0, 0}},
+        {types::ModelVariant::PtE550W,  {}},
+        {types::ModelVariant::PtP750W,  {}},
+        {types::ModelVariant::PtP710BT, {}},
     };
 
-    // Minimum feed margin in dots.  Spec §2.6: for 180-dpi models the minimum
-    // is 14 dots; for a 360-dpi pass it doubles to 28 dots.
-    inline const std::map<types::ModelVariant, uint8_t> minFeedMarginDots {
-        {types::ModelVariant::PtE550W,   14},
-        {types::ModelVariant::PtP750W,   14},
-        {types::ModelVariant::PtP710BT,  14},
+    // Minimum feed margin.  Spec §2.6: for 180-dpi models the minimum is 14 dots;
+    // for a 360-dpi pass it doubles to 28 dots. ESC i d carries dots, unlike the
+    // PAPPL margins above which are hundredths of a millimetre.
+    inline const std::map<types::ModelVariant, util::units::DotCount> minFeedMargin {
+        {types::ModelVariant::PtE550W,   14 * util::units::dot},
+        {types::ModelVariant::PtP750W,   14 * util::units::dot},
+        {types::ModelVariant::PtP710BT,  14 * util::units::dot},
     };
 
     inline const std::map<std::string_view, types::ModelVariant> modelVariantMap {

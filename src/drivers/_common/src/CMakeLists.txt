@@ -24,6 +24,9 @@ target_sources(utils
 
 target_compile_features(utils PUBLIC cxx_std_23)
 
+# PUBLIC: include/units.h is part of the utils interface.
+target_link_libraries(utils PUBLIC mp-units::mp-units)
+
 target_include_directories(utils
         PUBLIC
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
