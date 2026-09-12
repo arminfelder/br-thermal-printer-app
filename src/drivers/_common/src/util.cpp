@@ -59,6 +59,22 @@ namespace util
 
         return reversed;
     }
+    std::vector<uint8_t> buildHeadLine(const std::span<const uint8_t> &delivered,
+                                       const size_t headBytes)
+    {
+        const auto usable = std::min(delivered.size(), headBytes);
+
+        // Dots that the media does not cover are on the right of the tape. Mirroring moves
+        // them to the front of the line.
+        std::vector<uint8_t> line(headBytes - usable, 0);
+        line.reserve(headBytes);
+
+        const auto mirrored = mirrorLine(delivered.first(usable));
+        line.insert(line.end(), mirrored.begin(), mirrored.end());
+
+        return line;
+    }
+
 
     std::vector<uint8_t> compressLine(const std::vector<uint8_t>& data)
     {

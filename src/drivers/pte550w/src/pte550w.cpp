@@ -379,19 +379,21 @@ namespace drivers::pte550w
                 return false;
             }
 
-            // Printer head: 128 pins = 16 bytes. PAPPL may deliver more bytes
-            // (e.g. 22 for 24mm at 180dpi), but the first 16 bytes cover the
-            // 128 print-area pins. The extra bytes are right-side zeros.
-            constexpr unsigned kPrinterBytes = 16;
+            // Printer head: 128 pins = 16 bytes. PAPPL can deliver more bytes or fewer. It
+            // calculates cupsBytesPerLine from the media geometry, thus a 12 mm tape at
+            // 180 dpi gives 85 dots = 11 bytes against the 16-byte head. Size the span from
+            // what PAPPL allocated, then let buildHeadLine clamp and pad it.
+            constexpr size_t kPrinterBytes = 16;
 
+            const auto deliveredBytes = static_cast<size_t>(options->header.cupsBytesPerLine);
 #ifdef __clang__
 #pragma clang unsafe_buffer_usage begin
 #endif
-            const std::span lineData(pixels, kPrinterBytes);
+            const std::span lineData(pixels, deliveredBytes);
 #ifdef __clang__
 #pragma clang unsafe_buffer_usage end
 #endif
-            const auto mirroredLine = util::mirrorLine(lineData);
+            const auto mirroredLine = util::buildHeadLine(lineData, kPrinterBytes);
             const auto compressed = util::compressLine(mirroredLine);
             const commands::RasterGraphicsTransfer rgt{
                 static_cast<int>(compressed.size()), compressed};
