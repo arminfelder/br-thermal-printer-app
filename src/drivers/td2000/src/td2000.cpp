@@ -173,7 +173,9 @@ namespace drivers::td2000
             // 1. Spec §4 p.27-28: ESC i U (1Bh 69h 55h 77h 01h + 127 bytes) —
             //    Additional media information command; updates the printer's media info.
             //    May be skipped if media has not changed since the last print.
-            const auto mediaInfo = media::getMediaInfoForMedia(jobData->modelFamily, options->media.size_width, options->media.size_length, mediaType);
+            const auto mediaWidth  = util::units::fromPwg(options->media.size_width);
+            const auto mediaLength = util::units::fromPwg(options->media.size_length);
+            const auto mediaInfo = media::getMediaInfoForMedia(jobData->modelFamily, mediaWidth, mediaLength, mediaType);
             if (mediaInfo == media::none)
             {
                 papplLogJob(job, PAPPL_LOGLEVEL_ERROR, "Unsupported media dimensions for model family");
@@ -201,8 +203,8 @@ namespace drivers::td2000
                                static_cast<uint8_t>(types::PrintInfoFlags::pi_recover) |
                                static_cast<uint8_t>(types::PrintInfoFlags::pi_length);
             info.pageType = (pageNumber == 0) ? types::PageType::startingPage : types::PageType::otherPage;
-            info.mediaWidth  = static_cast<uint8_t>(options->media.size_width  / 100);
-            info.mediaLength = static_cast<uint8_t>(options->media.size_length / 100);
+            info.mediaWidth  = static_cast<uint8_t>(util::units::toWholeMillimetres(mediaWidth));
+            info.mediaLength = static_cast<uint8_t>(util::units::toWholeMillimetres(mediaLength));
             // Raster number is 4 bytes little-endian (n5=LSB, n8=MSB).
             const auto rasterLineCount = static_cast<uint32_t>(options->header.cupsHeight);
             const auto rasterBytes = std::bit_cast<std::array<uint8_t, 4>>(rasterLineCount);
@@ -227,9 +229,12 @@ namespace drivers::td2000
 
             // 4. Spec §4 p.30: ESC i d (1Bh 69h 64h {n1} {n2}) — Specify margin amount.
             //    margin(dots) = n1 + n2*256. Die-cut labels must use 0 ("only 0 is available").
-            const uint8_t feedMargin = (mediaType == types::MediaType::ContinuousLengthTape)
-                                       ? minFeedMarginDots.at(jobData->modelFamily) : 0;
-            const commands::SpecifyMarginAmount specifyMargin(feedMargin, 0);
+            const util::units::DotCount feedMargin =
+                (mediaType == types::MediaType::ContinuousLengthTape)
+                    ? minFeedMargin.at(jobData->modelFamily)
+                    : 0 * util::units::dot;
+            const commands::SpecifyMarginAmount specifyMargin(
+                feedMargin.numerical_value_in(util::units::dot), 0);
             if (!util::writeToDevice(specifyMargin.get(), device, jobId))
             {
                 papplLogJob(job, PAPPL_LOGLEVEL_ERROR, "failed to send specifyMargin");
@@ -637,8 +642,10 @@ namespace drivers::td2000
 
     namespace media
     {
-        types::MediaInfo getMediaInfoForMedia(const types::ModelFamily family, const int width, const int length, const types::MediaType type) noexcept
+        types::MediaInfo getMediaInfoForMedia(const types::ModelFamily family, const util::units::MediaSize width, const util::units::MediaSize length, const types::MediaType type) noexcept
         {
+            using mp_units::si::unit_symbols::mm;
+
             //TODO: use media information from the printer instead of static data
             auto pick = [&](const types::MediaInfo& td2x2x_val, const types::MediaInfo& td2x3x_val) -> types::MediaInfo {
                 return (family == types::ModelFamily::Td2x3x) ? td2x3x_val : td2x2x_val;
@@ -647,19 +654,19 @@ namespace drivers::td2000
             switch (type)
             {
             case types::MediaType::ContinuousLengthTape:
-                return (width <= 5700) ? pick(td2x2x::_57mm, td2x3x::_57mm)
-                                       : pick(td2x2x::_58mm, td2x3x::_58mm);
+                return (width <= 57 * mm) ? pick(td2x2x::_57mm, td2x3x::_57mm)
+                                          : pick(td2x2x::_58mm, td2x3x::_58mm);
 
             case types::MediaType::DieCutLabels:
-                if (width <= 4000)
+                if (width <= 40 * mm)
                 {
-                    if (length <= 4000) return pick(td2x2x::_40x40mm, td2x3x::_40x40mm);
-                    if (length <= 5000) return pick(td2x2x::_40x50mm, td2x3x::_40x50mm);
-                    if (length <= 6000) return pick(td2x2x::_40x60mm, td2x3x::_40x60mm);
+                    if (length <= 40 * mm) return pick(td2x2x::_40x40mm, td2x3x::_40x40mm);
+                    if (length <= 50 * mm) return pick(td2x2x::_40x50mm, td2x3x::_40x50mm);
+                    if (length <= 60 * mm) return pick(td2x2x::_40x60mm, td2x3x::_40x60mm);
                 }
-                else if (width <= 5000) return pick(td2x2x::_50x30mm, td2x3x::_50x30mm);
-                else if (width <= 5100) return pick(td2x2x::_51x26mm, td2x3x::_51x26mm);
-                else if (width <= 6000) return pick(td2x2x::_60x60mm, td2x3x::_60x60mm);
+                else if (width <= 50 * mm) return pick(td2x2x::_50x30mm, td2x3x::_50x30mm);
+                else if (width <= 51 * mm) return pick(td2x2x::_51x26mm, td2x3x::_51x26mm);
+                else if (width <= 60 * mm) return pick(td2x2x::_60x60mm, td2x3x::_60x60mm);
                 return none; // dimensions outside handled ranges
 
             case types::MediaType::NoMedia:
@@ -743,10 +750,10 @@ namespace drivers::td2000
             {
                 driverData->media_ready[0].size_width  = pwg->width;
                 driverData->media_ready[0].size_length = pwg->length;
-                driverData->media_ready[0].bottom_margin = margins.at(family).bottom;
-                driverData->media_ready[0].left_margin   = margins.at(family).left;
-                driverData->media_ready[0].right_margin  = margins.at(family).right;
-                driverData->media_ready[0].top_margin    = margins.at(family).top;
+                driverData->media_ready[0].bottom_margin = util::units::toPwg(margins.at(family).bottom);
+                driverData->media_ready[0].left_margin   = util::units::toPwg(margins.at(family).left);
+                driverData->media_ready[0].right_margin  = util::units::toPwg(margins.at(family).right);
+                driverData->media_ready[0].top_margin    = util::units::toPwg(margins.at(family).top);
 
                 papplCopyString(driverData->media_ready[0].source, driverData->source[0], sizeof(driverData->media_ready[0].source));
                 papplCopyString(driverData->media_ready[0].type,   driverData->type[0],   sizeof(driverData->media_ready[0].type));
@@ -761,10 +768,10 @@ namespace drivers::td2000
             {
                 driverData->media_default.size_width  = pwg->width;
                 driverData->media_default.size_length = pwg->length;
-                driverData->media_default.bottom_margin = margins.at(family).bottom;
-                driverData->media_default.left_margin   = margins.at(family).left;
-                driverData->media_default.right_margin  = margins.at(family).right;
-                driverData->media_default.top_margin    = margins.at(family).top;
+                driverData->media_default.bottom_margin = util::units::toPwg(margins.at(family).bottom);
+                driverData->media_default.left_margin   = util::units::toPwg(margins.at(family).left);
+                driverData->media_default.right_margin  = util::units::toPwg(margins.at(family).right);
+                driverData->media_default.top_margin    = util::units::toPwg(margins.at(family).top);
                 papplCopyString(driverData->media_default.type, driverData->type[0], sizeof(driverData->media_default.type));
             }
             else

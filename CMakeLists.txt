@@ -52,6 +52,9 @@ include(${CMAKE_SOURCE_DIR}/cmake/SafetyFlags.cmake)
 include(${CMAKE_SOURCE_DIR}/cmake/PapplCups.cmake)
 pappl_cups_setup()
 
+include(${CMAKE_SOURCE_DIR}/cmake/MpUnits.cmake)
+mp_units_setup()
+
 # ==============================================================================
 # Install Paths
 # ==============================================================================
