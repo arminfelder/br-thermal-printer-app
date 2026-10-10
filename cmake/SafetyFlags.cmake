@@ -260,13 +260,11 @@ option(STATIC_LIBSTDCXX "Link libstdc++ and libgcc statically (for running on ol
 #     excluded from sanitizer builds.
 # ---------------------------------------------------------------------------
 if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT ENABLE_SANITIZERS)
-    add_compile_options(-U_FORTIFY_SOURCE)
-    add_compile_definitions(_FORTIFY_SOURCE=3)
+    add_compile_options(-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3)
 elseif (ENABLE_SANITIZERS)
     # Sanitizer builds: explicitly unset any distro default to avoid
     # false positives / false negatives.
-    add_compile_options(-U_FORTIFY_SOURCE)
-    add_compile_definitions(_FORTIFY_SOURCE=0)
+    add_compile_options(-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0)
 endif ()
 
 # ---------------------------------------------------------------------------
