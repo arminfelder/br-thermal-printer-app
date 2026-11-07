@@ -1,3 +1,9 @@
+br-thermal (0.7.2-1) unstable; urgency=medium
+
+  * **debian**: stop installing mp-units headers into the package
+
+ -- github-actions <github-actions@br-thermal>  Sat, 07 Nov 2026 22:00:12 +0000
+
 br-thermal (0.7.1-1) unstable; urgency=medium
 
   * rebuild

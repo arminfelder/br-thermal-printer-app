@@ -1,3 +1,9 @@
+## v0.7.2 (2026-11-07)
+
+### Fix
+
+- **debian**: stop installing mp-units headers into the package
+
 ## v0.7.1 (2026-11-07)
 
 ### Fix
