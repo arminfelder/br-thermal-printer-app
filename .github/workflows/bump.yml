@@ -54,6 +54,11 @@ jobs:
           if cz bump --changelog --yes; then
             NEW_TAG=$(git describe --tags --abbrev=0 --match 'v*')
             git add debian/changelog
+            DEB_VERSION=$(dpkg-parsechangelog -S Version)
+            if [ "$DEB_VERSION" != "${NEW_TAG#v}-1" ]; then
+              echo "debian/changelog version $DEB_VERSION does not match $NEW_TAG" >&2
+              exit 1
+            fi
             git commit --amend --no-edit -S
             git tag -f "$NEW_TAG" HEAD
             git push origin HEAD:refs/heads/main
