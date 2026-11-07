@@ -53,6 +53,7 @@ function(mp_units_setup)
             GIT_SHALLOW TRUE
             SOURCE_SUBDIR src
             SYSTEM
+            EXCLUDE_FROM_ALL
     )
     FetchContent_MakeAvailable(mp-units)
 endfunction()
