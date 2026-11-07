@@ -1,3 +1,19 @@
+## v0.7.0 (2026-11-07)
+
+### Feat
+
+- implent OpenSSF recommendations
+- pipeline-test
+
+### Fix
+
+- dot grind in the background
+- **raster**: centre the raster line under the print head
+- handle mdl missing
+- **raster**: size the raster span from cupsBytesPerLine, not the head width
+- **td2020**: mediaformat parsing
+- missing units.h
+
 ## v0.6.0 (2026-05-27)
 
 ### Feat
