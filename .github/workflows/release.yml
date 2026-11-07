@@ -41,7 +41,7 @@ jobs:
         run: |
           TAG="${{ github.ref_name }}"
           VERSION="${TAG#v}"
-          NOTES=$(awk "/^## $VERSION/{flag=1; next} /^## [0-9]/{flag=0} flag" CHANGELOG.md)
+          NOTES=$(awk "/^## v$VERSION /{flag=1; next} /^## v?[0-9]/{flag=0} flag" CHANGELOG.md)
           echo "notes<<EOF" >> "$GITHUB_OUTPUT"
           echo "$NOTES" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
