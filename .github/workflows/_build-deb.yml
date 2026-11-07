@@ -26,6 +26,8 @@ jobs:
           if [ "${{ inputs.arch }}" = "amd64" ]; then
             apt-get install -y --no-install-recommends \
               build-essential \
+              ca-certificates \
+              git \
               debhelper \
               cmake \
               pkg-config \
@@ -38,6 +40,8 @@ jobs:
             apt-get install -y --no-install-recommends \
               build-essential \
               crossbuild-essential-${{ inputs.arch }} \
+              ca-certificates \
+              git \
               debhelper \
               cmake \
               pkg-config \

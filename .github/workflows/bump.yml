@@ -25,7 +25,7 @@ jobs:
           passphrase: ${{ secrets.GIT_GPG_PASSPHRASE }}
           git_user_signingkey: true
           git_commit_gpgsign: true
-          trust_model: ultimate
+          trust_level: 5
 
       - name: GPG user IDs
         run: |
@@ -52,10 +52,11 @@ jobs:
           DEBFULLNAME: ${{ steps.import-gpg.outputs.name }}
         run: |
           if cz bump --changelog --yes; then
-            NEW_TAG=$(git describe --tags --abbrev=0)
+            NEW_TAG=$(git describe --tags --abbrev=0 --match 'v*')
+            git add debian/changelog
             git commit --amend --no-edit -S
             git tag -f "$NEW_TAG" HEAD
-            git push origin HEAD:main
+            git push origin HEAD:refs/heads/main
             git push -f origin "refs/tags/$NEW_TAG"
             gh workflow run release.yml --ref "$NEW_TAG"
           else
