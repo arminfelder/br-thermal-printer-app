@@ -195,3 +195,4 @@ ctest --test-dir build --output-on-failure
 ## License
 
 GNU General Public License v3.0 or later. See [LICENSE](LICENSE) for the full text.
+
