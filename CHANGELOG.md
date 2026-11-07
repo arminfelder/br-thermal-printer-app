@@ -1,3 +1,9 @@
+## v0.7.3 (2026-11-07)
+
+### Fix
+
+- **ci**: extract release notes for v-prefixed changelog headings
+
 ## v0.7.2 (2026-11-07)
 
 ### Fix
