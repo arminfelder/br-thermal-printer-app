@@ -33,6 +33,15 @@ function(mp_units_setup)
         return()
     endif ()
 
+    # The project sets C++23 per target. The mp-units __cpp_lib_format probe
+    # uses the compiler default (gnu++17), so it fails. Then mp-units requires
+    # fmt, and Debian trixie does not have fmt. The function scope keeps C++23
+    # local to mp-units. Remove the cached probe result to force a new probe.
+    set(CMAKE_CXX_STANDARD 23)
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
+    unset(MP_UNITS_LIB_FORMAT_SUPPORTED CACHE)
+    set(MP_UNITS_API_STD_FORMAT ON CACHE BOOL "" FORCE)
+
     include(FetchContent)
     # SYSTEM marks the interface include dirs as system headers. Without it the
     # global -Werror warning set (-Wconversion, -Wold-style-cast,
