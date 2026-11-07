@@ -1,3 +1,9 @@
+br-thermal (0.7.1-1) unstable; urgency=medium
+
+  * rebuild
+
+ -- github-actions <github-actions@br-thermal>  Sat, 07 Nov 2026 21:47:13 +0000
+
 br-thermal (0.7.0-1) unstable; urgency=medium
 
   * implent OpenSSF recommendations
