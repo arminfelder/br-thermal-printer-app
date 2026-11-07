@@ -1,3 +1,15 @@
+br-thermal (0.7.0-1) unstable; urgency=medium
+
+  * implent OpenSSF recommendations
+  * dot grid in the background
+  * **raster**: centre the raster line under the print head
+  * handle mdl missing
+  * **raster**: size the raster span from cupsBytesPerLine, not the head
+    width
+  * **td2020**: mediaformat parsing
+
+ -- github-actions <github-actions@br-thermal>  Sat, 07 Nov 2026 22:12:43 +0100
+
 br-thermal (0.1-1) unstable; urgency=low
 
   * Initial release.
