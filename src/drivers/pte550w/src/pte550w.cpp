@@ -675,6 +675,13 @@ namespace drivers::pte550w
         driverData->raster_types      = PAPPL_PWG_RASTER_TYPE_BLACK_1;
         driverData->force_raster_type = PAPPL_PWG_RASTER_TYPE_BLACK_1;
 
+        // PAPPL prints a dot when the gray value is less than or equal to the dither value.
+        // The default blue-noise matrix has a 255 cell, thus white areas get a dot grid.
+        for (auto *matrix : {&driverData->gdither, &driverData->pdither})
+            for (auto &row : *matrix)
+                for (auto &cell : row)
+                    cell = std::min<unsigned char>(cell, 254);
+
         driverData->duplex          = PAPPL_DUPLEX_NONE;
         driverData->sides_supported = PAPPL_SIDES_ONE_SIDED;
         driverData->sides_default   = PAPPL_SIDES_ONE_SIDED;
