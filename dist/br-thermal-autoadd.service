@@ -7,5 +7,7 @@ Requires=br-thermal.service
 Type=oneshot
 User=_br-thermal
 Group=_br-thermal
+Environment=TMPDIR=/run/br-thermal
+PrivateTmp=true
 SupplementaryGroups=plugdev
 ExecStart=/usr/sbin/br-thermal autoadd

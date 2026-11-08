@@ -202,12 +202,27 @@ and
 .TP
 .I /var/lib/br-thermal
 Default spool and state directory.
+The systemd service keeps its state in
+.IR /var/lib/br-thermal/br-thermal.state .
 .TP
-.I /tmp/br-thermal\fIUID\fR.sock
-PAPPL IPC socket used for communication between sub-commands and a running
-server, where
+.I /run/br-thermal/br-thermal\fIUID\fR.sock
+PAPPL IPC socket of the systemd service, where
 .I UID
-is the numeric user ID of the server process.
+is the numeric user ID of the
+.B _br-thermal
+user.
+The service sets
+.BR TMPDIR=/run/br-thermal .
+A sub-command finds this socket only if it runs as
+.B _br-thermal
+with the same
+.BR TMPDIR .
+If it does not find the socket, it shows
+"Unable to start server" and its exit status is still 0.
+A server that you start without
+.B TMPDIR
+uses
+.IR /tmp/br-thermal\fIUID\fR.sock .
 .TP
 .I /lib/udev/rules.d/60-br-thermal.rules
 Udev rule granting the
@@ -231,6 +246,14 @@ Start the server, logging to the journal at info level:
 br\-thermal server \-o log-file=\- \-o log-level=info \e
     \-o listen-hostname=localhost \-o server-name=localhost \e
     \-o spool-directory=/var/lib/br-thermal \-o server-options=no-tls
+.EE
+.RE
+.PP
+Show the printers of the running systemd service:
+.PP
+.RS
+.EX
+sudo \-u _br-thermal env TMPDIR=/run/br\-thermal br\-thermal printers
 .EE
 .RE
 .PP
