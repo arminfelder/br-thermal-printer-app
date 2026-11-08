@@ -1,3 +1,9 @@
+## v0.7.4 (2026-11-08)
+
+### Fix
+
+- **systemd**: store PAPPL state in /var/lib/br-thermal
+
 ## v0.7.3 (2026-11-07)
 
 ### Fix

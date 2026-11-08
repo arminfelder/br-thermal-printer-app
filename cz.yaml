@@ -7,7 +7,7 @@ commitizen:
   - bash scripts/changelog-to-dch.sh
   tag_format: v$version
   update_changelog_on_bump: true
-  version: 0.7.3
+  version: 0.7.4
   version_files:
   - VERSION
   version_scheme: semver2
