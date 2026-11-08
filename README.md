@@ -149,7 +149,7 @@ sudo usermod -aG <group> $USER   # log out and back in to apply
 # Option 2: install the udev rule from the source tree manually
 sudo cp dist/60-br-thermal.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules
-sudo udevadm trigger --subsystem-match=usb
+sudo udevadm trigger --action=change --subsystem-match=usb --attr-match=idVendor=04f9
 ```
 
 ## Building from Source
