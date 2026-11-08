@@ -12,11 +12,14 @@ case "$1" in
                     --gecos "Brother Thermal Printer Driver" \
                     _br-thermal
         fi
-        udevadm control --reload-rules || true
-        udevadm trigger --subsystem-match=usb || true
     ;;
 esac
 
 #DEBHELPER#
+
+if [ "$1" = configure ] && [ -S /run/udev/control ]; then
+    udevadm control --reload-rules || true
+    udevadm trigger --action=change --subsystem-match=usb --attr-match=idVendor=04f9 || true
+fi
 
 exit 0
