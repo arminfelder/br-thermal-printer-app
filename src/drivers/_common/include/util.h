@@ -24,6 +24,7 @@
 #include <ranges>
 #include <concepts>
 #include <span>
+#include <string>
 
 extern "C" {
 #include <pappl/base.h>
@@ -33,6 +34,9 @@ extern "C" {
 
 namespace util
 {
+    // The debug dump goes to the service state directory. Without systemd, it goes to the PAPPL temporary directory.
+    std::string debugDumpPath(int jobId);
+
     template<std::ranges::contiguous_range R>
     requires std::same_as<std::ranges::range_value_t<R>, uint8_t>
     bool writeToDevice(const R& data, pappl_device_t* device, const int jobId, bool debug = false)
@@ -44,7 +48,7 @@ namespace util
 
         if (debug)
         {
-            std::string filepath = "/tmp/td2000-debug-" + std::to_string(jobId) + ".dump";
+            const std::string filepath = debugDumpPath(jobId);
             std::ofstream debug_file(filepath,
                                      std::ios::app | std::ios::binary);
             if (debug_file.is_open())

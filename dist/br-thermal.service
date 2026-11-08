@@ -6,6 +6,7 @@ Wants=br-thermal-autoadd.service
 
 [Service]
 Type=exec
+Environment=TMPDIR=/run/br-thermal
 # Without this, PAPPL writes the state file to /tmp because HOME is /nonexistent.
 Environment=XDG_CONFIG_HOME=/var/lib/br-thermal
 EnvironmentFile=-/etc/default/br-thermal
@@ -18,7 +19,7 @@ ExecStart=/usr/sbin/br-thermal server \
     -o log-level=${LOG_LEVEL} \
     -o spool-directory=/var/lib/br-thermal \
     -o server-options=no-tls
-ExecStartPost=/bin/sh -c 'until [ -S /tmp/br-thermal$(id -u).sock ]; do sleep 0.2; done'
+ExecStartPost=/bin/sh -c 'until [ -S "$TMPDIR/br-thermal$(id -u).sock" ]; do sleep 0.2; done'
 Restart=on-failure
 RestartSec=5
 
@@ -35,9 +36,7 @@ LogsDirectory=br-thermal
 # ---------------------------------------------------------------------------
 ProtectSystem=strict
 ProtectHome=true
-# /tmp is needed for the PAPPL IPC socket (/tmp/br-thermal<uid>.sock)
-ReadWritePaths=/tmp /var/lib/br-thermal
-PrivateTmp=false
+PrivateTmp=true
 
 # ---------------------------------------------------------------------------
 # Devices

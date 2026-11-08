@@ -18,9 +18,12 @@
 //
 
 #include <algorithm>
+#include <cstdlib>
 #include <ostream>
 #include <fstream>
 #include <ranges>
+#include <string>
+#include <string_view>
 
 extern "C" {
 #include <pappl/base.h>
@@ -31,6 +34,22 @@ extern "C" {
 
 namespace util
 {
+    std::string debugDumpPath(const int jobId)
+    {
+        // systemd sets STATE_DIRECTORY for StateDirectory=. It can be a list with ":" separators.
+        std::string_view dir;
+        if (const char* state = std::getenv("STATE_DIRECTORY"); state != nullptr)
+        {
+            dir = state;
+            dir = dir.substr(0, dir.find(':'));
+        }
+        if (dir.empty())
+        {
+            dir = papplGetTempDir();
+        }
+        return std::string(dir) + "/br-thermal-debug-" + std::to_string(jobId) + ".dump";
+    }
+
     uint8_t reverseBitOrder(const uint8_t value)
     {
        return static_cast<uint8_t>(

@@ -15,8 +15,10 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdlib>
 #include <ranges>
 #include <span>
+#include <string>
 #include <vector>
 
 #include <catch2/catch_test_macros.hpp>
@@ -163,6 +165,30 @@ TEST_CASE("writeToDevice - null device returns false", "[writeToDevice]")
     const std::vector<uint8_t> data{0x01, 0x02, 0x03};
 
     REQUIRE(writeToDevice(data, nullptr, 1) == false);
+}
+
+TEST_CASE("debugDumpPath - uses STATE_DIRECTORY from systemd", "[debugDumpPath]")
+{
+    ::setenv("STATE_DIRECTORY", "/var/lib/br-thermal", 1);
+    REQUIRE(debugDumpPath(5) == "/var/lib/br-thermal/br-thermal-debug-5.dump");
+    ::unsetenv("STATE_DIRECTORY");
+}
+
+TEST_CASE("debugDumpPath - takes the first entry of a STATE_DIRECTORY list", "[debugDumpPath]")
+{
+    ::setenv("STATE_DIRECTORY", "/var/lib/a:/var/lib/b", 1);
+    REQUIRE(debugDumpPath(7) == "/var/lib/a/br-thermal-debug-7.dump");
+    ::unsetenv("STATE_DIRECTORY");
+}
+
+TEST_CASE("debugDumpPath - falls back to the PAPPL temporary directory", "[debugDumpPath]")
+{
+    ::unsetenv("STATE_DIRECTORY");
+    REQUIRE(debugDumpPath(3) == std::string(papplGetTempDir()) + "/br-thermal-debug-3.dump");
+
+    ::setenv("STATE_DIRECTORY", "", 1);
+    REQUIRE(debugDumpPath(3) == std::string(papplGetTempDir()) + "/br-thermal-debug-3.dump");
+    ::unsetenv("STATE_DIRECTORY");
 }
 
 // ---------------------------------------------------------------------------
