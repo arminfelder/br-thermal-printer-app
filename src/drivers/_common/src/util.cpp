@@ -18,17 +18,24 @@
 //
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdlib>
-#include <ostream>
-#include <fstream>
+#include <cups/cups.h>
+#include <iterator>
+#include <pappl/device.h>
+#include <pappl/log.h>
+#include <pappl/printer.h>
 #include <ranges>
+#include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 extern "C" {
 #include <pappl/base.h>
-#include <pappl/pappl.h>
 }
+
+#include <array>
 
 #include "util.h"
 
@@ -48,6 +55,41 @@ namespace util
             dir = papplGetTempDir();
         }
         return std::string(dir) + "/br-thermal-debug-" + std::to_string(jobId) + ".dump";
+    }
+
+    std::string modelFromDeviceId(const char* deviceId)
+    {
+        cups_option_t* did = nullptr;
+        const int numOptions = papplDeviceParseID(deviceId, &did);
+        // cupsGetOption gives a null pointer when the key is absent.
+        const char* mdl = cupsGetOption("MDL", numOptions, did);
+        std::string model(mdl != nullptr ? mdl : "");
+        cupsFreeOptions(numOptions, did);
+        return model;
+    }
+
+    void logCallbackFailure(pappl_job_t* job, const char* what) noexcept
+    {
+        if (job)
+        {
+            papplLogJob(job, PAPPL_LOGLEVEL_ERROR, "Driver callback failed: %s", what);
+        }
+    }
+
+    void logCallbackFailure(pappl_printer_t* printer, const char* what) noexcept
+    {
+        if (printer)
+        {
+            papplLogPrinter(printer, PAPPL_LOGLEVEL_ERROR, "Driver callback failed: %s", what);
+        }
+    }
+
+    void logCallbackFailure(pappl_system_t* system, const char* what) noexcept
+    {
+        if (system)
+        {
+            papplLog(system, PAPPL_LOGLEVEL_ERROR, "Driver callback failed: %s", what);
+        }
     }
 
     uint8_t reverseBitOrder(const uint8_t value)
@@ -162,6 +204,14 @@ namespace util
                 }
                 i += literalLength;
             }
+        }
+
+        // Raster spec, TIFF compression: if the result is longer than the line, send the
+        // line as one literal run. One run holds a maximum of 128 bytes.
+        if (compressed.size() > data.size() && !data.empty() && data.size() <= 128)
+        {
+            compressed.assign(1, static_cast<uint8_t>(data.size() - 1));
+            compressed.insert(compressed.end(), data.begin(), data.end());
         }
         return compressed;
     }

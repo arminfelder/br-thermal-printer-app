@@ -13,17 +13,7 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-include(FetchContent)
-
-if(NOT TARGET Catch2::Catch2)
-    FetchContent_Declare(
-            Catch2
-            GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-            GIT_TAG v3.12.0
-    )
-    FetchContent_MakeAvailable(Catch2)
-    include(Catch)
-endif()
+include(${CMAKE_CURRENT_LIST_DIR}/../../../../cmake/Catch2.cmake)
 
 include(CTest)
 

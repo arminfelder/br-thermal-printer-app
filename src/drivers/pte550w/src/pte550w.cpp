@@ -16,664 +16,453 @@
 #include "pte550w.h"
 
 #include <algorithm>
+#include <array>
+#include <bit>
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <exception>
+#include <cups/cups.h>
 #include <memory>
 #include <optional>
-#include <span>
-#include <thread>
+#include <string>
+#include <pappl/log.h>
+#include <pappl/printer.h>
+#include <string_view>
+#include <vector>
 
 extern "C" {
-#include <pappl/pappl.h>
 #include <pappl/base.h>
 }
 
+#include "driver_data.h"
+#include "raster_pipeline.h"
 #include "util.h"
 #include "units.h"
 
 namespace drivers::pte550w
 {
-    // -----------------------------------------------------------------------
-    // Internal helpers
-    // -----------------------------------------------------------------------
-
-    // Attempts one non-blocking read and returns the 32-byte status packet if
-    // byte 0 (printHeadMark) equals 0x80 (spec §4 p.22, Table 4).
-    static std::optional<types::PrinterInfo> readStatusPacket(pappl_device_t *device)
+    namespace
     {
-        types::PrinterInfo info{};
-        const auto result = papplDeviceRead(device,
-                                             info.raw.data(),
-                                             info.raw.size());
-        if (result == static_cast<ssize_t>(info.raw.size()) &&
-            info.fields().printHeadMark == 0x80)
+        using brother::pipeline::JobContext;
+        using brother::pipeline::PageContext;
+
+        // Spec §3 p.22: ESC i S is NOT supported by PT-E550W or PT-P750W.
+        bool supportsStatusRequest(const types::ModelVariant variant)
         {
-            return info;
+            return variant == types::ModelVariant::PtP710BT;
         }
+
+        struct IppDeleter
+        {
+            void operator()(ipp_t* ipp) const noexcept { ippDelete(ipp); }
+        };
+
+        // The value of the job. If the job has none, the default of the printer.
+        //
+        // PAPPL 1.4.9 does not put the default into options->vendor: it keeps
+        // "<name>-default" in the driver attributes, but the job code looks in the
+        // printer attributes (job-process.c). A CUPS queue with a PPD cannot send the
+        // option with the job, thus the default is necessary.
+        std::optional<std::string> resolveOption(const pappl_pr_options_t* options, ipp_t* driverAttrs,
+                                                 const char* name)
+        {
+            if (const char* raw = cupsGetOption(name, options->num_vendor, options->vendor))
+            {
+                return std::string(raw);
+            }
+            if (!driverAttrs)
+            {
+                return std::nullopt;
+            }
+            const std::string defaultName = std::string(name) + "-default";
+            ipp_attribute_t* attr = ippFindAttribute(driverAttrs, defaultName.c_str(), IPP_TAG_ZERO);
+            if (!attr)
+            {
+                return std::nullopt;
+            }
+            std::array<char, 256> value{};
+            ippAttributeString(attr, value.data(), value.size());
+            return std::string(value.data());
+        }
+
+        // A value that is not a number keeps `fallback`. A number out of range is clamped.
+        int readClampedOption(pappl_job_t* job, const pappl_pr_options_t* options, ipp_t* driverAttrs,
+                              const char* name, const int minimum, const int maximum, const int fallback)
+        {
+            const auto resolved = resolveOption(options, driverAttrs, name);
+            if (!resolved)
+            {
+                return fallback;
+            }
+            int value = 0;
+            std::size_t used = 0;
+            try
+            {
+                value = std::stoi(*resolved, &used);
+            }
+            catch (const std::exception&)
+            {
+                used = 0;
+            }
+            if (used == 0 || used != resolved->size())
+            {
+                papplLogJob(job, PAPPL_LOGLEVEL_WARN, "%s: not a number: %s, using %d", name, resolved->c_str(),
+                            fallback);
+                return fallback;
+            }
+            const int clamped = std::clamp(value, minimum, maximum);
+            if (clamped != value)
+            {
+                papplLogJob(job, PAPPL_LOGLEVEL_WARN, "%s: %d is not in %d-%d, using %d", name, value, minimum,
+                            maximum, clamped);
+            }
+            return clamped;
+        }
+
+        types::JobOptions readJobOptions(pappl_job_t* job, const pappl_pr_options_t* options)
+        {
+            types::JobOptions result{};
+            // papplPrinterGetDriverAttributes gives a copy that the caller owns.
+            const std::unique_ptr<ipp_t, IppDeleter> driverAttrs(
+                papplPrinterGetDriverAttributes(papplJobGetPrinter(job)));
+
+            if (const auto raw = resolveOption(options, driverAttrs.get(), vendorOptions::cutMode))
+            {
+                if (const auto mode = parseCutMode(*raw))
+                {
+                    result.cutMode = *mode;
+                }
+                else
+                {
+                    papplLogJob(job, PAPPL_LOGLEVEL_WARN, "%s: unknown value %s, using %s", vendorOptions::cutMode,
+                                raw->c_str(), cutModeName(result.cutMode));
+                }
+            }
+            if (const auto raw = resolveOption(options, driverAttrs.get(), vendorOptions::chainPrinting))
+            {
+                result.chainPrinting = (*raw == "on");
+            }
+            result.marginMm = readClampedOption(job, options, driverAttrs.get(), vendorOptions::margin,
+                                                vendorOptions::marginMinMm, vendorOptions::marginMaxMm,
+                                                result.marginMm);
+            result.cutEvery = readClampedOption(job, options, driverAttrs.get(), vendorOptions::cutEvery,
+                                                vendorOptions::cutEveryMin, vendorOptions::cutEveryMax,
+                                                result.cutEvery);
+            return result;
+        }
+
+        // Makes the ready media of the printer equal to the TZe tape that the status block
+        // reports. PAPPL gives the margins of the ready media to the clients and uses them
+        // for the jobs, and the side margin is different for each tape width.
+        void syncReadyMedia(pappl_printer_t* printer, const types::PrinterInfo& info)
+        {
+            const auto fields = info.fields();
+            if (fields.mediaType != types::MediaType::LaminatedTape &&
+                fields.mediaType != types::MediaType::NonLaminatedTape)
+            {
+                return;
+            }
+            const auto tape = tapeForStatusWidth(fields.mediaWidth);
+            if (!tape)
+            {
+                return;
+            }
+            const auto data = std::make_unique<pappl_pr_driver_data_t>();
+            if (!papplPrinterGetDriverData(printer, data.get()))
+            {
+                return;
+            }
+            auto& ready = data->media_ready[0];
+            const int margin = util::units::toPwg(sideMargin(*tape));
+            if (ready.size_width == tape->widthPwg && ready.left_margin == margin && ready.right_margin == margin)
+            {
+                return;
+            }
+            ready.size_width   = tape->widthPwg;
+            ready.left_margin  = margin;
+            ready.right_margin = margin;
+            if (!pwgFormatSizeName(ready.size_name, sizeof(ready.size_name), "roll", "current", ready.size_width,
+                                   ready.size_length, nullptr))
+            {
+                return;
+            }
+            if (papplPrinterSetReadyMedia(printer, data->num_source, data->media_ready))
+            {
+                papplLogPrinter(printer, PAPPL_LOGLEVEL_INFO, "Tape in the printer: %s", ready.size_name);
+            }
+        }
+
+        struct Traits
+        {
+            using Model = types::ModelVariant;
+            using PrinterInfo = types::PrinterInfo;
+            using RasterGraphicsTransfer = commands::RasterGraphicsTransfer;
+
+            // Spec §2.1 p.5: 100 bytes of NULL for PT-E550W/P750W/P710BT.
+            static size_t invalidateBytes(Model) { return 100; }
+            // TIFF PackBits is MANDATORY: without it the printer prints blank labels.
+            static constexpr bool compressRaster = true;
+
+            static const Model* modelFor(const std::string_view mdl)
+            {
+                const auto it = modelVariantMap.find(mdl);
+                return it != modelVariantMap.end() ? &it->second : nullptr;
+            }
+
+            static int headBytes(const Model variant) { return lineWidth.at(variant); }
+
+            static bool acceptsMediaType(const std::string_view ippType)
+            {
+                return ippType == "continuous" || ippType == "labels-continuous";
+            }
+
+            // Spec §5 flow charts: invalidate, initialize, status request, control codes.
+            static bool startJob(const JobContext<Model>& ctx)
+            {
+                return !supportsStatusRequest(ctx.model) ||
+                       brother::pipeline::checkStatusAtJobStart<PrinterInfo>(ctx);
+            }
+
+            // Spec §2.1 p.5, the control codes of each page:
+            //   1. ESC i a   switch dynamic command mode (raster)
+            //   2. ESC i !   switch automatic status notification mode
+            //   3. ESC i z   print information
+            //   4. ESC i M   various mode settings
+            //   5. ESC i A   specify page number in "cut each * labels"
+            //   6. ESC i K   advanced mode settings
+            //   7. ESC i d   specify margin amount
+            //   8. M         select compression mode
+            static bool startPage(const PageContext<Model>& ctx)
+            {
+                const auto write = [&](const std::vector<uint8_t>& data)
+                {
+                    return util::writeToDevice(data, ctx.device, ctx.jobId);
+                };
+
+                if (!write(commands::SwitchDynamicCommandMode{types::CommandMode::Raster}.get()) ||
+                    !write(commands::SwitchAutoStatusNotify{}.get()))
+                {
+                    return false;
+                }
+
+                const auto jobOptions = readJobOptions(ctx.job, ctx.options);
+                const auto page = pageSettings(ctx.data.model, ctx.options->header.HWResolution[1],
+                                               ctx.options->header.cupsHeight, jobOptions);
+                papplLogJob(ctx.job, PAPPL_LOGLEVEL_DEBUG,
+                            "cut-mode=%s chain-printing=%s margin=%u dots cut-every=%u high-resolution=%d",
+                            cutModeName(jobOptions.cutMode), jobOptions.chainPrinting ? "on" : "off",
+                            static_cast<unsigned>(page.feedMarginDots), static_cast<unsigned>(page.cutEvery),
+                            page.highResolution ? 1 : 0);
+                ctx.data.lineLimit = page.rasterLines;
+
+                // 3. Spec §4 p.32: {n3} is the tape width in mm, {n4} is 0 for continuous tape.
+                const auto mediaWidth = util::units::fromPwg(ctx.options->media.size_width);
+                const auto info = printInformation(tapeWidthCode(mediaWidth), page.rasterLines, ctx.pageType);
+                if (!write(commands::PrintInformation{info}.get()))
+                {
+                    return false;
+                }
+
+                // 4. and 6. The cut mode and chain printing give ESC i M and ESC i K.
+                const auto mode = buildModeBytes(jobOptions.cutMode, jobOptions.chainPrinting, ctx.data.model,
+                                                 page.highResolution);
+                if (!write(commands::VariousModeSettings{mode.various}.get()))
+                {
+                    return false;
+                }
+
+                // 5. Cut after each `cutEvery` labels.
+                if (page.sendCutEvery && !write(commands::SpecifyPageNumber{page.cutEvery}.get()))
+                {
+                    return false;
+                }
+
+                return write(commands::AdvancedModeSettings{mode.advanced}.get()) &&
+                       write(commands::SpecifyMarginAmount{page.feedMarginDots}.get()) &&
+                       write(commands::SelectCompressionMode{types::CompressionMode::Compression}.get());
+            }
+
+            static unsigned statusReasons(const PrinterInfo& info) { return pte550w::statusReasons(info); }
+            static bool pausesPrinting(const PrinterInfo& info) { return pte550w::pausesPrinting(info); }
+            static bool resumesPrinting(const PrinterInfo& info) { return pte550w::resumesPrinting(info); }
+
+            // Only the PT-P710BT answers ESC i S. The other models send status only during a
+            // job, thus there is nothing to poll when they are idle.
+            static bool pollsStatus(const Model variant) { return supportsStatusRequest(variant); }
+
+            static void onStatus(pappl_printer_t* printer, const PrinterInfo& info) { syncReadyMedia(printer, info); }
+        };
+
+        using Pipeline = brother::pipeline::Pipeline<Traits>;
+    }
+
+    PageSettings pageSettings(const types::ModelVariant variant, const unsigned feedDpi, const unsigned cupsHeight,
+                              const types::JobOptions& options)
+    {
+        const bool high = feedDpi == 360;
+        // Millimetres to dots at 180 dpi, rounded: 2 mm is 14 dots, 127 mm is 900 dots.
+        const int marginMm = std::clamp(options.marginMm, vendorOptions::marginMinMm, vendorOptions::marginMaxMm);
+        const int minimum  = minFeedMargin.at(variant).numerical_value_in(util::units::dot);
+        const int dots180  = std::max((marginMm * 1800 + 127) / 254, minimum);
+        const auto maxLines = high ? maxRasterLines360 : maxRasterLines180;
+        return PageSettings{
+            .highResolution = high,
+            .feedMarginDots = static_cast<uint16_t>(dots180 * (high ? 2 : 1)),
+            .rasterLines    = std::min<uint32_t>(cupsHeight, maxLines),
+            .sendCutEvery   = variant != types::ModelVariant::PtP710BT,
+            .cutEvery       = static_cast<uint8_t>(
+                std::clamp(options.cutEvery, vendorOptions::cutEveryMin, vendorOptions::cutEveryMax)),
+        };
+    }
+
+    std::optional<types::CutMode> parseCutMode(const std::string_view value) noexcept
+    {
+        if (value == "full")         return types::CutMode::Full;
+        if (value == "half")         return types::CutMode::Half;
+        if (value == "none")         return types::CutMode::None;
+        if (value == "special-tape") return types::CutMode::SpecialTape;
         return std::nullopt;
     }
 
-    namespace callbacks
+    const char* cutModeName(const types::CutMode mode) noexcept
     {
-        // ------------------------------------------------------------------
-        bool print([[maybe_unused]] pappl_job_t     *job,
-                   [[maybe_unused]] pappl_pr_options_t *options,
-                   [[maybe_unused]] pappl_device_t   *device)
+        switch (mode)
         {
-            return (job && options && device);
+        case types::CutMode::Half:        return "half";
+        case types::CutMode::None:        return "none";
+        case types::CutMode::SpecialTape: return "special-tape";
+        case types::CutMode::Full:
+        default:                          return "full";
         }
+    }
 
-        // ------------------------------------------------------------------
-        bool startJob(pappl_job_t *job, pappl_pr_options_t *options,
-                      pappl_device_t *device)
+    types::ModeBytes buildModeBytes(const types::CutMode mode, const bool chainPrinting,
+                                    const types::ModelVariant variant, const bool highResolution) noexcept
+    {
+        const auto effective = (mode == types::CutMode::Half && variant == types::ModelVariant::PtP710BT)
+                                   ? types::CutMode::Full
+                                   : mode;
+
+        types::VariousModeSettingsFields various{};
+        various.autoCut     = effective == types::CutMode::Full || effective == types::CutMode::Half;
+        various.mirrorPrint = false;
+
+        types::AdvancedModeSettingsFields advanced{};
+        advanced.halfCut         = effective == types::CutMode::Half;
+        advanced.specialTape     = effective == types::CutMode::SpecialTape;
+        advanced.noChainPrinting = !chainPrinting;
+        advanced.highResolution  = highResolution;
+
+        types::ModeBytes bytes{};
+        bytes.various.set_fields(various);
+        bytes.advanced.set_fields(advanced);
+        return bytes;
+    }
+
+    std::optional<Tape> tapeForStatusWidth(const uint8_t statusWidth) noexcept
+    {
+        const auto it = std::ranges::find(tapes, statusWidth, &Tape::statusWidth);
+        return it != tapes.end() ? std::optional<Tape>(*it) : std::nullopt;
+    }
+
+    std::optional<Tape> tapeForMediaWidth(const util::units::MediaSize width) noexcept
+    {
+        // The nominal width and the real width are different by up to 0.1 mm (3.5 mm is
+        // 3.4 mm, 6 mm is 5.9 mm). The widths are 2.5 mm or more apart.
+        constexpr int tolerancePwg = 60;
+        const int pwg = util::units::toPwg(width);
+        const auto it = std::ranges::find_if(
+            tapes, [pwg](const Tape& tape) { return std::abs(tape.widthPwg - pwg) <= tolerancePwg; });
+        return it != tapes.end() ? std::optional<Tape>(*it) : std::nullopt;
+    }
+
+    util::units::MediaSize sideMargin(const Tape& tape) noexcept
+    {
+        // Dots at 180 dpi to hundredths of a millimetre, rounded up.
+        return util::units::fromPwg((tape.sideMarginDots * 2540 + 179) / 180);
+    }
+
+    uint8_t tapeWidthCode(const util::units::MediaSize width) noexcept
+    {
+        if (const auto tape = tapeForMediaWidth(width))
         {
-            if (!job || !options || !device)
-                return false;
-
-            const auto jobId = papplJobGetID(job);
-
-            // Resolve model variant from the IEEE 1284 device-ID string.
-            std::array<char, 128> deviceId{};
-            if (papplDeviceGetID(device, deviceId.data(), deviceId.size()) == nullptr)
-                return false;
-
-            cups_option_t *did     = nullptr;
-            const int     numOpts  = papplDeviceParseID(deviceId.data(), &did);
-            const char   *mdl      = cupsGetOption("MDL", numOpts, did);
-            const std::string model = mdl ? mdl : "";
-            cupsFreeOptions(numOpts, did);
-
-            if (model.empty())
-                return false;
-
-            const auto variantIt = modelVariantMap.find(model);
-            if (variantIt == modelVariantMap.end())
-            {
-                papplLogJob(job, PAPPL_LOGLEVEL_ERROR,
-                            "Unknown PT-E550W/P750W/P710BT model: %s", model.c_str());
-                return false;
-            }
-            const auto variant = variantIt->second;
-
-            auto jobData = std::make_unique<types::JobData>(types::JobData{
-                .variant        = variant,
-                .useCompression = true,   // MANDATORY for this printer family
-                .bytesPerLine   = lineWidth.at(variant),
-            });
-
-            // Spec §5 flow charts: Invalidate → Initialize → Status request → control codes.
-            // Invalidate: 100 NULL bytes (spec §2.1 p.5).
-            if (!util::writeToDevice(commands::Invalidate{}.get(), device, jobId))
-                return false;
-
-            // ESC @ — Initialize.
-            if (!util::writeToDevice(commands::Initialize{}.get(), device, jobId))
-                return false;
-
-            // Spec §3 p.22: ESC i S is NOT supported by PT-E550W or PT-P750W.
-            // Only send it for PT-P710BT.
-            if (variant == types::ModelVariant::PtP710BT)
-            {
-                if (!util::writeToDevice(
-                        commands::StatusInformationRequest{}.get(),
-                        device, jobId))
-                    return false;
-
-                if (const auto packet = readStatusPacket(device))
-                {
-                    if (packet->fields().statusType == types::StatusType::ErrorOccurred)
-                    {
-                        papplLogJob(job, PAPPL_LOGLEVEL_ERROR,
-                                    "Printer reported error 0x%02x 0x%02x",
-                                    std::bit_cast<uint8_t>(packet->fields().errorInformation1),
-                                    std::bit_cast<uint8_t>(packet->fields().errorInformation2));
-                        return false;
-                    }
-                }
-            }
-
-            // Mark push-status mode so getStatus() does not issue ESC i S
-            // while data transmission is ongoing (spec §4, ESC i S note).
-            const auto printer = papplJobGetPrinter(job);
-            const auto uri     = papplPrinterGetDeviceURI(printer);
-            {
-                std::lock_guard lock(printerStateMutex);
-                printerStatusPolling[uri] = true;
-            }
-
-            papplJobSetData(job, jobData.release());
-            return true;
+            return tape->statusWidth;
         }
+        return static_cast<uint8_t>(std::clamp((util::units::toPwg(width) + 50) / 100, 0, 255));
+    }
 
-        // ------------------------------------------------------------------
-        // Spec §2.1 p.5 control code sequence (per page):
-        //   1. ESC i a   — Switch dynamic command mode (raster)
-        //   2. ESC i !   — Switch automatic status notification mode
-        //   3. ESC i z   — Print information command
-        //   4. ESC i M   — Various mode settings
-        //   5. ESC i A   — Specify page number in "cut each * labels"
-        //   6. ESC i K   — Advanced mode settings
-        //   7. ESC i d   — Specify margin amount
-        //   8. M         — Select compression mode
-        bool startPage(pappl_job_t *job, pappl_pr_options_t *options,
-                       pappl_device_t *device, unsigned pageNumber)
-        {
-            if (!job || !options || !device)
-                return false;
+    types::PrintInfoFields printInformation(const unsigned mediaWidthMm, const uint32_t rasterLines,
+                                            const types::PageType pageType)
+    {
+        types::PrintInfoFields info{};
+        info.validFields = static_cast<uint8_t>(types::PrintInfoFlags::pi_recover) |
+                           static_cast<uint8_t>(types::PrintInfoFlags::pi_width);
+        info.mediaType   = 0x00;
+        info.mediaWidth  = static_cast<uint8_t>(mediaWidthMm);
+        info.mediaLength = 0;
+        std::ranges::copy(std::bit_cast<std::array<uint8_t, 4>>(rasterLines), info.rasterNumber);
+        info.pageType = pageType;
+        info.quality  = 0x00;
+        return info;
+    }
 
-            const auto jobId = papplJobGetID(job);
+    unsigned statusReasons(const types::PrinterInfo& info)
+    {
+        const auto fields = info.fields();
+        unsigned status = PAPPL_PREASON_NONE;
+        if (fields.errorInformation2.coverOpen)
+            status |= PAPPL_PREASON_COVER_OPEN;
+        if (fields.errorInformation1.noMedia)
+            status |= PAPPL_PREASON_MEDIA_EMPTY | PAPPL_PREASON_MEDIA_NEEDED;
+        if (fields.errorInformation2.wrongMedia)
+            status |= PAPPL_PREASON_MEDIA_NEEDED;
+        if (fields.errorInformation1.cutterJam)
+            status |= PAPPL_PREASON_MEDIA_JAM;
+        if (fields.errorInformation1.weakBatteries || fields.errorInformation2.overheating)
+            status |= PAPPL_PREASON_OTHER;
 
-            const std::string_view mediaTypeStr(options->media.type);
-            if (mediaTypeStr != "continuous" && mediaTypeStr != "labels-continuous")
-            {
-                papplLogJob(job, PAPPL_LOGLEVEL_ERROR,
-                            "Unsupported media type for PT-E550W/P750W/P710BT: %s",
-                            options->media.type);
-                return false;
-            }
+        if (fields.statusType == types::StatusType::TurnedOff)
+            status |= PAPPL_PREASON_OFFLINE;
+        if (fields.statusType == types::StatusType::Notification &&
+            fields.notificationNumber == types::NotificationNumber::CoverOpen)
+            status |= PAPPL_PREASON_COVER_OPEN;
+        return status;
+    }
 
-            const auto jobData = static_cast<types::JobData *>(papplJobGetData(job));
-            if (!jobData)
-            {
-                papplLogJob(job, PAPPL_LOGLEVEL_ERROR, "jobData is null");
-                return false;
-            }
+    bool pausesPrinting(const types::PrinterInfo&) { return false; }
 
-            // 1. ESC i a — Switch to raster mode.
-            if (!util::writeToDevice(
-                    commands::SwitchDynamicCommandMode{types::CommandMode::Raster}.get(),
-                    device, jobId))
-                return false;
+    bool resumesPrinting(const types::PrinterInfo&) { return false; }
 
-            // 2. ESC i ! — Switch automatic status notification (notify=0).
-            if (!util::writeToDevice(
-                    commands::SwitchAutoStatusNotify{}.get(), device, jobId))
-                return false;
-
-            // 3. ESC i z — Print information.
-            //    Spec §4 p.32: {n3}=media width (mm), {n4}=media length (0 for continuous).
-            //    validFlags: pi_recover|pi_width = 0x84 (spec sample §2.2.3 p.11).
-            types::PrintInfoFields info{};
-            info.validFields = static_cast<uint8_t>(types::PrintInfoFlags::pi_recover)
-                             | static_cast<uint8_t>(types::PrintInfoFlags::pi_width)
-                             | static_cast<uint8_t>(types::PrintInfoFlags::pi_kind);
-            info.mediaType   = static_cast<uint8_t>(types::MediaType::LaminatedTape);
-            const auto mediaWidth = util::units::fromPwg(options->media.size_width);
-            info.mediaWidth  = static_cast<uint8_t>(util::units::toWholeMillimetres(mediaWidth));
-            info.mediaLength = 0;
-
-            info.pageType    = (pageNumber == 0) ? types::PageType::startingPage
-                                                 : types::PageType::otherPage;
-
-            const auto rasterLineCount =
-                static_cast<uint32_t>(options->header.cupsHeight);
-            const auto rasterBytes =
-                std::bit_cast<std::array<uint8_t, 4>>(rasterLineCount);
-            std::ranges::copy(rasterBytes, info.rasterNumber);
-
-            info.quality = 0x00;
-
-            if (!util::writeToDevice(
-                    commands::PrintInformation{info}.get(), device, jobId))
-                return false;
-
-            // 4. ESC i M — Various mode settings.
-            //    Spec §4 p.33: bit 6=auto cut, bit 7=mirror. Enable auto cut.
-            types::VariousModeSettingsFields vmsFields{};
-            vmsFields.autoCut     = true;
-            vmsFields.mirrorPrint = false;
-            types::VariousModeSettings settings{};
-            settings.set_fields(vmsFields);
-
-            if (!util::writeToDevice(
-                    commands::VariousModeSettings{settings}.get(), device, jobId))
-                return false;
-
-            // 5. ESC i A — Specify the page number in "cut each * labels".
-            //    Default: 1 (cut each label).
-            if (!util::writeToDevice(
-                    commands::SpecifyPageNumber{1}.get(), device, jobId))
-                return false;
-
-            // 6. ESC i K — Advanced mode settings.
-            //    Spec §4 p.33: bit 3=no chain printing (1=feed+cut after last).
-            types::AdvancedModeSettingsFields amsFields{};
-            amsFields.noChainPrinting = true;
-            types::AdvancedModeSettings ams{};
-            ams.set_fields(amsFields);
-
-            if (!util::writeToDevice(
-                    commands::AdvancedModeSettings{ams}.get(), device, jobId))
-                return false;
-
-            // 7. ESC i d — Specify margin amount.
-            //    Minimum 14 dots at 180 dpi, 28 dots at 360 dpi (spec §2.3.3).
-            util::units::DotCount feedMargin = minFeedMargin.at(jobData->variant);
-            if (options->header.HWResolution[0] == 360)
-                feedMargin = feedMargin * 2;
-
-            if (!util::writeToDevice(
-                    commands::SpecifyMarginAmount{
-                        feedMargin.numerical_value_in(util::units::dot), 0}.get(),
-                    device, jobId))
-                return false;
-
-            // 8. M — Select compression mode.
-            //    TIFF PackBits is mandatory for this printer family.
-            if (!util::writeToDevice(
-                    commands::SelectCompressionMode{
-                        types::CompressionMode::Compression}.get(),
-                    device, jobId))
-                return false;
-
-            return true;
-        }
-
-        // ------------------------------------------------------------------
-        void applyPrinterStatus(pappl_printer_t *printer,
-                                const types::PrinterInfo &info,
-                                const char *uri)
-        {
-            {
-                std::lock_guard lock(printerStateMutex);
-                printerStatus[uri] = info;
-            }
-
-            const auto fields = info.fields();
-            if (fields.statusType == types::StatusType::ErrorOccurred)
-            {
-                unsigned int status = PAPPL_PREASON_NONE;
-                if (fields.errorInformation2.coverOpen)
-                    status |= PAPPL_PREASON_COVER_OPEN;
-                if (fields.errorInformation1.noMedia)
-                    status |= PAPPL_PREASON_MEDIA_EMPTY | PAPPL_PREASON_MEDIA_NEEDED;
-                if (fields.errorInformation2.wrongMedia)
-                    status |= PAPPL_PREASON_MEDIA_NEEDED;
-                if (fields.errorInformation1.cutterJam)
-                    status |= PAPPL_PREASON_MEDIA_JAM;
-                if (fields.errorInformation1.weakBatteries ||
-                    fields.errorInformation2.overheating)
-                    status |= PAPPL_PREASON_OTHER;
-                papplPrinterSetReasons(printer,
-                                       static_cast<pappl_preason_t>(status),
-                                       PAPPL_PREASON_DEVICE_STATUS);
-            }
-            else if (fields.statusType == types::StatusType::TurnedOff)
-            {
-                papplPrinterSetReasons(printer, PAPPL_PREASON_OFFLINE,
-                                       PAPPL_PREASON_DEVICE_STATUS);
-            }
-            else if (fields.statusType == types::StatusType::Notification)
-            {
-                if (fields.notificationNumber ==
-                        types::NotificationNumber::CoolingStarted   ||
-                    fields.notificationNumber ==
-                        types::NotificationNumber::WaitingForPeeling ||
-                    fields.notificationNumber ==
-                        types::NotificationNumber::PrinterPaused)
-                {
-                    papplPrinterSetReasons(printer, PAPPL_PREASON_OTHER,
-                                           PAPPL_PREASON_DEVICE_STATUS);
-                }
-                else
-                {
-                    papplPrinterSetReasons(printer, PAPPL_PREASON_NONE,
-                                           PAPPL_PREASON_DEVICE_STATUS);
-                }
-            }
-            else
-            {
-                papplPrinterSetReasons(printer, PAPPL_PREASON_NONE,
-                                       PAPPL_PREASON_DEVICE_STATUS);
-            }
-        }
-
-        // ------------------------------------------------------------------
-        bool waitForPrinterResume(pappl_job_t *job, pappl_device_t *device,
-                                   pappl_printer_t *printer, const char *uri)
-        {
-            constexpr int kMaxWaitMs = 120'000;
-            constexpr int kDelayMs   = 100;
-
-            for (int waited = 0; waited < kMaxWaitMs; waited += kDelayMs)
-            {
-                if (const auto packet = readStatusPacket(device))
-                {
-                    const auto fields = packet->fields();
-                    applyPrinterStatus(printer, *packet, uri);
-                    if (fields.statusType == types::StatusType::Notification &&
-                        (fields.notificationNumber ==
-                             types::NotificationNumber::CoolingFinished ||
-                         fields.notificationNumber ==
-                             types::NotificationNumber::FinishedPrinterPaused))
-                    {
-                        papplLogJob(job, PAPPL_LOGLEVEL_INFO, "Printer resumed");
-                        return true;
-                    }
-                    if (fields.statusType == types::StatusType::ErrorOccurred)
-                    {
-                        papplLogJob(job, PAPPL_LOGLEVEL_ERROR,
-                                    "Printer error while waiting to resume");
-                        return false;
-                    }
-                }
-                std::this_thread::sleep_for(std::chrono::milliseconds(kDelayMs));
-            }
-            papplLogJob(job, PAPPL_LOGLEVEL_ERROR,
-                        "Timed out waiting for printer to resume");
-            return false;
-        }
-
-        // ------------------------------------------------------------------
-        bool writeLine(pappl_job_t *job, pappl_pr_options_t *options,
-                       pappl_device_t *device,
-                       [[maybe_unused]] unsigned pageNumber,
-                       const unsigned char *pixels)
-        {
-            if (!pixels || !options || !job || !device)
-                return false;
-
-            const auto jobData =
-                static_cast<types::JobData *>(papplJobGetData(job));
-            if (!jobData)
-            {
-                papplLogJob(job, PAPPL_LOGLEVEL_ERROR, "jobData is null");
-                return false;
-            }
-
-            // Printer head: 128 pins = 16 bytes. PAPPL can deliver more bytes or fewer. It
-            // calculates cupsBytesPerLine from the media geometry, thus a 12 mm tape at
-            // 180 dpi gives 85 dots = 11 bytes against the 16-byte head. Size the span from
-            // what PAPPL allocated, then let buildHeadLine clamp and pad it.
-            constexpr size_t kPrinterBytes = 16;
-
-            const auto deliveredBytes = static_cast<size_t>(options->header.cupsBytesPerLine);
-#ifdef __clang__
-#pragma clang unsafe_buffer_usage begin
-#endif
-            const std::span lineData(pixels, deliveredBytes);
-#ifdef __clang__
-#pragma clang unsafe_buffer_usage end
-#endif
-            const auto mirroredLine = util::buildHeadLine(
-                lineData,
-                static_cast<size_t>(options->header.cupsWidth),
-                kPrinterBytes * 8);
-            const auto compressed = util::compressLine(mirroredLine);
-            const commands::RasterGraphicsTransfer rgt{
-                static_cast<int>(compressed.size()), compressed};
-            const auto rasterCmd = rgt.get();
-
-            const auto printer = papplJobGetPrinter(job);
-            const auto uri     = papplPrinterGetDeviceURI(printer);
-
-            for (int retry = 0; retry <= 1; ++retry)
-            {
-                const auto written =
-                    papplDeviceWrite(device, rasterCmd.data(), rasterCmd.size());
-                if (written == static_cast<ssize_t>(rasterCmd.size()))
-                {
-                    papplDeviceFlush(device);
-
-                    if (const auto packet = readStatusPacket(device))
-                    {
-                        const auto fields = packet->fields();
-                        applyPrinterStatus(printer, *packet, uri);
-
-                        if (fields.statusType == types::StatusType::ErrorOccurred)
-                            return false;
-                        if (fields.statusType == types::StatusType::Notification &&
-                            (fields.notificationNumber ==
-                                 types::NotificationNumber::CoolingStarted ||
-                             fields.notificationNumber ==
-                                 types::NotificationNumber::PrinterPaused))
-                        {
-                            if (!waitForPrinterResume(job, device, printer, uri))
-                                return false;
-                        }
-                    }
-                    return true;
-                }
-
-                if (retry >= 1) break;
-
-                papplLogJob(job, PAPPL_LOGLEVEL_WARN,
-                            "Raster write failed, checking for cooling or pause");
-
-                std::optional<types::PrinterInfo> statusPacket;
-                for (int attempt = 0; attempt < 20; ++attempt)
-                {
-                    statusPacket = readStatusPacket(device);
-                    if (statusPacket) break;
-                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-                }
-                if (!statusPacket) return false;
-
-                const auto fields = statusPacket->fields();
-                applyPrinterStatus(printer, *statusPacket, uri);
-
-                if (fields.statusType == types::StatusType::Notification &&
-                    (fields.notificationNumber ==
-                         types::NotificationNumber::CoolingStarted ||
-                     fields.notificationNumber ==
-                         types::NotificationNumber::PrinterPaused))
-                {
-                    if (!waitForPrinterResume(job, device, printer, uri))
-                        return false;
-                }
-                else
-                    return false;
-            }
-            return false;
-        }
-
-        // ------------------------------------------------------------------
-        bool endPage(pappl_job_t *job, pappl_pr_options_t *options,
-                     pappl_device_t *device, const unsigned pageNumber)
-        {
-            if (!job || !options || !device)
-                return false;
-
-            const auto pageCount =
-                static_cast<unsigned>(papplJobGetImpressions(job));
-            if (pageNumber < pageCount - 1)
-            {
-                const auto jobId = papplJobGetID(job);
-                if (!util::writeToDevice(commands::Print{}.get(), device, jobId))
-                    return false;
-            }
-            return true;
-        }
-
-        // ------------------------------------------------------------------
-        bool endJob(pappl_job_t *job, pappl_pr_options_t *options,
-                    pappl_device_t *device)
-        {
-            if (!job || !options || !device)
-                return false;
-
-            const auto jobId = papplJobGetID(job);
-
-            // Spec §4: Control-Z (1Ah) — Print with feeding; last page.
-            if (!util::writeToDevice(
-                    commands::PrintWithFeeding{}.get(), device, jobId))
-            {
-                papplLogJob(job, PAPPL_LOGLEVEL_ERROR,
-                            "Failed to send PrintWithFeeding");
-                return false;
-            }
-
-            // Drain status packets until the printer returns to receiving state
-            // (spec §5.1 normal flow: PhaseChange Printing → PrintingCompleted →
-            //  PhaseChange Receiving).
-            constexpr int kMaxAttempts = 200;
-            for (int attempt = 0; attempt < kMaxAttempts; ++attempt)
-            {
-                if (const auto packet = readStatusPacket(device))
-                {
-                    const auto fields = packet->fields();
-                    if (fields.statusType == types::StatusType::PhaseChange &&
-                        fields.phaseType  == types::Phase::ReceivingState)
-                        break;
-                    if (fields.statusType == types::StatusType::ErrorOccurred)
-                    {
-                        papplLogJob(job, PAPPL_LOGLEVEL_ERROR,
-                                    "Printer error during job completion");
-                        break;
-                    }
-                    continue;
-                }
-                std::this_thread::sleep_for(std::chrono::milliseconds(20));
-            }
-
-            // Return to pull-mode so getStatus() can issue ESC i S again.
-            const auto printer = papplJobGetPrinter(job);
-            const auto uri     = papplPrinterGetDeviceURI(printer);
-            {
-                std::lock_guard lock(printerStateMutex);
-                printerStatusPolling[uri] = false;
-            }
-
-            const auto jobData = static_cast<types::JobData *>(papplJobGetData(job));
-            papplJobSetData(job, nullptr);
-            delete jobData;
-
-            return true;
-        }
-
-        // ------------------------------------------------------------------
-        bool getStatus(pappl_printer_t *printer)
-        {
-            const auto uri = papplPrinterGetDeviceURI(printer);
-
-            bool inPushMode = false;
-            {
-                std::lock_guard lock(printerStateMutex);
-                printerStatusPolling.try_emplace(uri, false);
-                inPushMode = printerStatusPolling.at(uri);
-            }
-
-            if (inPushMode)
-            {
-                // Do not send ESC i S while printing; just read any pushed packet.
-                const auto device = papplPrinterOpenDevice(printer);
-                if (!device)
-                    return true;
-
-                if (const auto packet = readStatusPacket(device))
-                    applyPrinterStatus(printer, *packet, uri);
-
-                papplPrinterCloseDevice(printer);
-                return true;
-            }
-
-            // Pull mode: only PT-P710BT supports ESC i S (spec §3 p.22).
-            // For PT-E550W and PT-P750W the printer pushes status automatically
-            // during printing; in idle state we have no pull mechanism, so we
-            // just report OK (the last pushed status is already applied).
-            std::array<char, 128> deviceId{};
-            {
-                const auto device = papplPrinterOpenDevice(printer);
-                if (device)
-                {
-                    papplDeviceGetID(device, deviceId.data(), deviceId.size());
-                    papplPrinterCloseDevice(printer);
-                }
-            }
-            cups_option_t *did = nullptr;
-            const int numOpts = papplDeviceParseID(deviceId.data(), &did);
-            const char *mdl   = cupsGetOption("MDL", numOpts, did);
-            const std::string model = mdl ? mdl : "";
-            cupsFreeOptions(numOpts, did);
-
-            const auto variantIt = modelVariantMap.find(model);
-            if (variantIt == modelVariantMap.end() ||
-                variantIt->second != types::ModelVariant::PtP710BT)
-            {
-                // Not P710BT — no ESC i S support, nothing to poll.
-                return true;
-            }
-
-            // PT-P710BT: send ESC i S and read the 32-byte response.
-            const auto device = papplPrinterOpenDevice(printer);
-            if (!device)
-            {
-                papplLogPrinter(printer, PAPPL_LOGLEVEL_WARN,
-                                "getStatus: could not open device");
-                return false;
-            }
-
-            if (!util::writeToDevice(
-                    commands::StatusInformationRequest{}.get(), device, -1))
-            {
-                papplPrinterCloseDevice(printer);
-                return false;
-            }
-
-            std::optional<types::PrinterInfo> received;
-            constexpr int kMaxAttempts = 100;
-            for (int attempt = 0; attempt < kMaxAttempts; ++attempt)
-            {
-                received = readStatusPacket(device);
-                if (received) break;
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
-            }
-
-            papplPrinterCloseDevice(printer);
-
-            if (!received)
-            {
-                papplLogPrinter(printer, PAPPL_LOGLEVEL_WARN,
-                                "getStatus: timed out waiting for status response");
-                return false;
-            }
-
-            applyPrinterStatus(printer, *received, uri);
-            return true;
-        }
-    } // namespace callbacks
-
-    // -----------------------------------------------------------------------
     bool updateDriverData(pappl_pr_driver_data_t *driverData,
-                          const std::string_view &model)
+                          const std::string_view &model, ipp_t** driverAttrs)
     {
-        if (!driverData)
-            return false;
-
-        const auto variantIt = modelVariantMap.find(model);
-        if (variantIt == modelVariantMap.end())
+        // An unknown model must give a clean IPP failure, not an exception that
+        // terminates the server.
+        const auto variant = Traits::modelFor(model);
+        if (!driverData || !variant)
         {
-            // An unknown model must give a clean IPP failure, not an exception that
-            // terminates the server.
             return false;
         }
-        const auto variant = variantIt->second;
-        const std::string makeAndModel = std::format("Brother {}", model);
 
-        driverData->printfile_cb  = callbacks::print;
-        driverData->rendjob_cb    = callbacks::endJob;
-        driverData->rendpage_cb   = callbacks::endPage;
-        driverData->rstartjob_cb  = callbacks::startJob;
-        driverData->rstartpage_cb = callbacks::startPage;
-        driverData->rwriteline_cb = callbacks::writeLine;
-        driverData->status_cb     = callbacks::getStatus;
-        driverData->output_face_up = true;
-        driverData->input_face_up  = true;
-
-        driverData->kind = PAPPL_KIND_LABEL;
-
-        papplCopyString(driverData->make_and_model,
-                        makeAndModel.c_str(),
-                        sizeof(driverData->make_and_model));
-
-        driverData->ppm = 1;
-
-        driverData->orient_default  = IPP_ORIENT_PORTRAIT;
-        driverData->color_supported = PAPPL_COLOR_MODE_MONOCHROME;
-        driverData->color_default   = PAPPL_COLOR_MODE_MONOCHROME;
-        driverData->content_default = PAPPL_CONTENT_TEXT;
-        driverData->quality_default = IPP_QUALITY_NORMAL;
-
-        driverData->raster_types      = PAPPL_PWG_RASTER_TYPE_BLACK_1;
-        driverData->force_raster_type = PAPPL_PWG_RASTER_TYPE_BLACK_1;
+        static constexpr std::array<const char*, 2> sources{"main-roll", "auto"};
+        // The default media is the 24 mm tape. syncReadyMedia changes the margins when
+        // the printer reports a different tape.
+        const auto side = sideMargin(tapes.back());
+        const brother::Margins defaultMargins{.left = side, .right = side};
+        const brother::DriverDataSpec spec{
+            .model      = model,
+            .kind       = PAPPL_KIND_LABEL,
+            .resolutions = resolutions,
+            .margins    = defaultMargins,
+            .media      = defaultMedia,
+            .mediaTypes = mediaTypes,
+            .sources    = sources,
+        };
+        if (!brother::fillDriverData(driverData, spec))
+        {
+            return false;
+        }
 
         // PAPPL prints a dot when the gray value is less than or equal to the dither value.
         // The default blue-noise matrix has a 255 cell, thus white areas get a dot grid.
@@ -682,84 +471,40 @@ namespace drivers::pte550w
                 for (auto &cell : row)
                     cell = std::min<unsigned char>(cell, 254);
 
-        driverData->duplex          = PAPPL_DUPLEX_NONE;
-        driverData->sides_supported = PAPPL_SIDES_ONE_SIDED;
-        driverData->sides_default   = PAPPL_SIDES_ONE_SIDED;
-        driverData->finishings      = PAPPL_FINISHINGS_NONE;
+        driverData->num_vendor = 4;
+        driverData->vendor[0]  = vendorOptions::cutMode;
+        driverData->vendor[1]  = vendorOptions::chainPrinting;
+        driverData->vendor[2]  = vendorOptions::margin;
+        driverData->vendor[3]  = vendorOptions::cutEvery;
 
-        // Only advertise 180x180. The "360 dpi" in the spec (§2.3.1) refers to
-        // the feed direction only; the cross-tape direction is always 128 pins
-        // regardless of resolution. Advertising x=360 causes PAPPL to render
-        // cupsWidth=340 pixels which breaks the 16-byte line extraction.
-        driverData->num_resolution  = 1;
-        driverData->x_resolution[0] = 180;
-        driverData->y_resolution[0] = 180;
-        driverData->x_default       = 180;
-        driverData->y_default       = 180;
-
-        driverData->left_right = 0;
-        driverData->bottom_top = 0;
-
-        driverData->num_source = 2;
-        driverData->source[0]  = "main-roll";
-        driverData->source[1]  = "auto";
-
-        driverData->num_type = static_cast<int>(mediaTypes.size());
-        std::ranges::copy(mediaTypes, driverData->type);
-
-        std::vector<const char *> media{defaultMedia.begin(), defaultMedia.end()};
-        driverData->num_media = static_cast<int>(media.size());
-        std::ranges::copy(media, driverData->media);
-
-        if (driverData->num_media > 0)
+        // PAPPL gives a null *driverAttrs. PAPPL copies the attributes and deletes this set.
+        if (driverAttrs)
         {
-            papplCopyString(driverData->media_ready[0].size_name,
-                            defaultMedia[0],
-                            sizeof(driverData->media_ready[0].size_name));
-
-            if (const pwg_media_t *pwg = pwgMediaForPWG(driverData->media_ready[0].size_name))
+            if (!*driverAttrs)
             {
-                driverData->media_ready[0].size_width  = pwg->width;
-                driverData->media_ready[0].size_length = pwg->length;
-                driverData->media_ready[0].bottom_margin = util::units::toPwg(margins.at(variant).bottom);
-                driverData->media_ready[0].left_margin   = util::units::toPwg(margins.at(variant).left);
-                driverData->media_ready[0].right_margin  = util::units::toPwg(margins.at(variant).right);
-                driverData->media_ready[0].top_margin    = util::units::toPwg(margins.at(variant).top);
-                papplCopyString(driverData->media_ready[0].source,
-                                driverData->source[0],
-                                sizeof(driverData->media_ready[0].source));
-                papplCopyString(driverData->media_ready[0].type,
-                                driverData->type[0],
-                                sizeof(driverData->media_ready[0].type));
+                *driverAttrs = ippNew();
             }
-            else
-            {
-                return false;
-            }
-
-            papplCopyString(driverData->media_default.size_name,
-                            defaultMedia[0],
-                            sizeof(driverData->media_default.size_name));
-
-            if (const pwg_media_t *pwg = pwgMediaForPWG(driverData->media_default.size_name))
-            {
-                driverData->media_default.size_width  = pwg->width;
-                driverData->media_default.size_length = pwg->length;
-                driverData->media_default.bottom_margin = util::units::toPwg(margins.at(variant).bottom);
-                driverData->media_default.left_margin   = util::units::toPwg(margins.at(variant).left);
-                driverData->media_default.right_margin  = util::units::toPwg(margins.at(variant).right);
-                driverData->media_default.top_margin    = util::units::toPwg(margins.at(variant).top);
-                papplCopyString(driverData->media_default.type,
-                                driverData->type[0],
-                                sizeof(driverData->media_default.type));
-            }
-            else
-            {
-                return false;
-            }
+            ippAddStrings(*driverAttrs, IPP_TAG_PRINTER, IPP_TAG_KEYWORD, "brother-cut-mode-supported",
+                          static_cast<int>(vendorOptions::cutModeValues.size()), nullptr,
+                          vendorOptions::cutModeValues.data());
+            ippAddString(*driverAttrs, IPP_TAG_PRINTER, IPP_TAG_KEYWORD, "brother-cut-mode-default", nullptr,
+                         vendorOptions::cutModeValues.front());
+            ippAddStrings(*driverAttrs, IPP_TAG_PRINTER, IPP_TAG_KEYWORD, "brother-chain-printing-supported",
+                          static_cast<int>(vendorOptions::chainPrintingValues.size()), nullptr,
+                          vendorOptions::chainPrintingValues.data());
+            ippAddString(*driverAttrs, IPP_TAG_PRINTER, IPP_TAG_KEYWORD, "brother-chain-printing-default", nullptr,
+                         vendorOptions::chainPrintingValues.front());
+            ippAddRange(*driverAttrs, IPP_TAG_PRINTER, "brother-margin-supported", vendorOptions::marginMinMm,
+                        vendorOptions::marginMaxMm);
+            ippAddInteger(*driverAttrs, IPP_TAG_PRINTER, IPP_TAG_INTEGER, "brother-margin-default",
+                          vendorOptions::marginMinMm);
+            ippAddRange(*driverAttrs, IPP_TAG_PRINTER, "brother-cut-every-supported", vendorOptions::cutEveryMin,
+                        vendorOptions::cutEveryMax);
+            ippAddInteger(*driverAttrs, IPP_TAG_PRINTER, IPP_TAG_INTEGER, "brother-cut-every-default",
+                          vendorOptions::cutEveryMin);
         }
 
+        Pipeline::install(driverData, *variant);
         return true;
     }
-
-} // namespace drivers::pte550w
+}

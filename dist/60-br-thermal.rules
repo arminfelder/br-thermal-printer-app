@@ -41,7 +41,7 @@ ATTR{idProduct}=="2060", GOTO="br_thermal_match"
 # PT-P750W
 ATTR{idProduct}=="2062", GOTO="br_thermal_match"
 # PT-P710BT
-ATTR{idProduct}=="2064", GOTO="br_thermal_match"
+ATTR{idProduct}=="20af", GOTO="br_thermal_match"
 GOTO="br_thermal_end"
 
 LABEL="br_thermal_match"

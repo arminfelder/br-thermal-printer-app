@@ -18,12 +18,13 @@
 
 #include <array>
 #include <map>
-#include <mutex>
-#include <set>
+#include <optional>
 #include <string>
 #include <type_traits>
 #include <vector>
 #include <pappl/pappl.h>
+#include "brother_raster.h"
+#include "driver_data.h"
 #include "units.h"
 
 // ---------------------------------------------------------------------------
@@ -33,37 +34,48 @@
 // Key differences from the TD-2000 driver:
 //   • Print head : 128 dots → 16 bytes per raster line (fixed for all models)
 //   • Media      : TZe laminated tape only (continuous; no die-cut labels)
-//   • Resolution : 180 dpi (E550W, P710BT) or 180/360 dpi (P750W)
+//   • Resolution : 180x180 dpi. 180x360 dpi exists but is not advertised, see `resolutions`.
 //   • Compression: TIFF PackBits is MANDATORY (blank output without it)
-//   • Feed margin: 14 dots at 180 dpi, 28 dots at 360 dpi (spec §2.6)
+//   • Feed margin: 14 dots at 180 dpi, 28 dots at 360 dpi (spec §2.3.3)
 // ---------------------------------------------------------------------------
 
 namespace drivers::pte550w
 {
     namespace types
     {
+        using brother::raster::types::CommandMode;
+        using brother::raster::types::CompressionMode;
+        using brother::raster::types::PackedProtocolBlock;
+        using brother::raster::types::PageType;
+        using brother::raster::types::Phase;
+        using brother::raster::types::PrintInfoFields;
+        using brother::raster::types::PrintInfoFlags;
+        using brother::raster::types::Resolution;
+        using brother::raster::types::StatusType;
+        using Margins = brother::Margins;
+
         // The three model variants shipped as one printer family.
-        // The P750W is the only one that also supports 360 dpi.
         enum class ModelVariant
         {
-            PtE550W,   // 180 dpi only
-            PtP750W,   // 180 / 360 dpi
-            PtP710BT,  // 180 dpi only (Bluetooth)
+            PtE550W,
+            PtP750W,
+            PtP710BT,
         };
 
-        struct Resolution {
-            int x;
-            int y;
-        };
-
-        // Model codes returned in the status response (spec §4, Table 4, byte 4).
-        // Values sourced from the raster command reference and cross-checked against
-        // open-source implementations of the same protocol.
+        // Status block offset 4 (spec §4 p.24). The spec gives no code for the PT-P710BT.
         enum class ModelCode : uint8_t
         {
-            PtE550W  = 0x6E,
-            PtP750W  = 0x69,
-            PtP710BT = 0x71,
+            PtE550W  = 0x66,   // "f"
+            PtP750W  = 0x68,   // "h"
+        };
+
+        // Status block offset 22 (spec §4 p.29, table 7). The PT family has no cooling
+        // or pause notification.
+        enum class NotificationNumber : uint8_t
+        {
+            NotAvailable = 0x00,
+            CoverOpen    = 0x01,
+            CoverClosed  = 0x02,
         };
 
         // Tape type as reported in the status response (spec §4, Table 4, byte 11).
@@ -73,89 +85,10 @@ namespace drivers::pte550w
             NoMedia          = 0x00,
             LaminatedTape    = 0x01,  // TZe laminated tape (continuous)
             NonLaminatedTape = 0x03,  // TZe non-laminated tape
-            HeatShrinkTube   = 0x11,  // HSe heat-shrink tube
+            HeatShrinkTube   = 0x11,  // HSe heat-shrink tube 2:1
+            HeatShrinkTube3To1 = 0x17,
             IncompatibleTape = 0xFF,
         };
-
-        enum class CompressionMode : uint8_t
-        {
-            NoCompression = 0x00,
-            // TIFF PackBits — MANDATORY for this printer family;
-            // without it the printer outputs blank labels.
-            Compression   = 0x02,
-        };
-
-        enum class StatusType : uint8_t
-        {
-            ReplyToStatusRequest = 0x00,
-            PrintingCompleted    = 0x01,
-            ErrorOccurred        = 0x02,
-            ExitIfMode           = 0x03,
-            TurnedOff            = 0x04,
-            Notification         = 0x05,
-            PhaseChange          = 0x06,
-        };
-
-        enum class Phase : uint8_t
-        {
-            ReceivingState = 0x00,
-            PrintingState  = 0x01,
-        };
-
-        enum class NotificationNumber : uint8_t
-        {
-            NotAvailable             = 0x00,
-            CoolingStarted           = 0x03,
-            CoolingFinished          = 0x04,
-            WaitingForPeeling        = 0x05,
-            FinishedWaitingForPeeling = 0x06,
-            PrinterPaused            = 0x07,
-            FinishedPrinterPaused    = 0x08,
-        };
-
-        enum class BatteryLevel : uint8_t
-        {
-            Full              = 0x00,
-            Half              = 0x01,
-            Low               = 0x02,
-            ChargingRequired  = 0x03,
-            AcAdapterInUse    = 0x04,
-        };
-
-        enum class CommandMode : uint8_t
-        {
-            ESCP    = 0x00,
-            Raster  = 0x01,
-            PTouch  = 0x03,
-        };
-
-        enum class PageType : uint8_t
-        {
-            startingPage = 0x00,
-            otherPage    = 0x01,
-        };
-
-        enum class PrintInfoFlags : uint8_t
-        {
-            pi_kind    = 0x02,
-            pi_width   = 0x04,
-            pi_length  = 0x08,
-            pi_quality = 0x40,
-            pi_recover = 0x80,
-        };
-
-        struct __attribute__((packed)) PrintInfoFields {
-            uint8_t  validFields   : 8;
-            uint8_t  mediaType     : 8;
-            uint8_t  mediaWidth    : 8;
-            uint8_t  mediaLength   : 8;
-            uint8_t  rasterNumber[4];
-            PageType pageType;
-            uint8_t  quality       : 8;
-        };
-        static_assert(sizeof(PrintInfoFields) == 10,
-                      "PrintInfo must match protocol size (10 bytes)");
-        static_assert(std::is_trivially_copyable_v<PrintInfoFields>);
 
         // Spec §4 p.26 — PT-E550W/P750W/P710BT error bit assignments.
         struct __attribute__((packed)) ErrorInformation1Fields
@@ -210,198 +143,77 @@ namespace drivers::pte550w
         static_assert(sizeof(AdvancedModeSettingsFields) == 1);
         static_assert(std::is_trivially_copyable_v<AdvancedModeSettingsFields>);
 
-        template <typename Fields, std::size_t Size>
-        struct PackedProtocolBlock {
-            static_assert(sizeof(Fields) == Size,
-                          "Protocol field size must match raw buffer size");
-            static_assert(std::is_trivially_copyable_v<Fields>,
-                          "Protocol fields must be trivially copyable");
-
-            std::array<uint8_t, Size> raw{};
-
-            [[nodiscard]] Fields fields() const noexcept {
-                return std::bit_cast<Fields>(raw);
-            }
-            void set_fields(const Fields& value) noexcept {
-                raw = std::bit_cast<std::array<uint8_t, Size>>(value);
-            }
-        };
-
         using VariousModeSettings  = PackedProtocolBlock<VariousModeSettingsFields, 1>;
         using AdvancedModeSettings = PackedProtocolBlock<AdvancedModeSettingsFields, 1>;
 
-        // Status response packet layout – identical 32-byte format to TD-2000.
-        // Spec §4 p.22 (Table 4): byte 0 (printHeadMark) is always 0x80.
-        struct __attribute__((packed)) PrinterInfoFields
+        // There is no full-cut bit. Full is auto cut without half cut.
+        enum class CutMode
         {
-            uint8_t                  printHeadMark      : 8;
-            uint8_t                  size               : 8;
-            uint8_t                                     : 8;
-            uint8_t                  seriesCode         : 8;
-            ModelCode                model;
-            uint8_t                                     : 8;
-            BatteryLevel             batteryLevel       : 8;
-            uint8_t                                     : 8;
-            ErrorInformation1Fields  errorInformation1;
-            ErrorInformation2Fields  errorInformation2;
-            uint8_t                  mediaWidth         : 8;
-            MediaType                mediaType;
-            uint8_t                                     : 8;
-            uint8_t                                     : 8;
-            uint8_t                                     : 8;
-            uint8_t                  mode               : 8;
-            uint8_t                                     : 8;
-            uint8_t                  mediaLength        : 8;
-            StatusType               statusType;
-            Phase                    phaseType          : 8;
-            uint8_t                  phaseNumber_lo     : 8;
-            uint8_t                  phaseNumber_hi     : 8;
-            NotificationNumber       notificationNumber;
-            uint8_t                                     : 8;
-            uint64_t                                    : 64;
+            Full,
+            Half,          // the laminate is cut, the backing is not
+            None,
+            SpecialTape,   // ESC i K bit 4: tape that must not be cut
         };
-        static_assert(sizeof(PrinterInfoFields) == 32,
-                      "PrinterInfoFields must match protocol size (32 bytes)");
-        static_assert(std::is_trivially_copyable_v<PrinterInfoFields>);
 
+        struct ModeBytes
+        {
+            VariousModeSettings  various;    // ESC i M
+            AdvancedModeSettings advanced;   // ESC i K
+        };
+
+        // The vendor options of one job.
+        struct JobOptions
+        {
+            CutMode cutMode       = CutMode::Full;
+            bool    chainPrinting = false;
+            int     marginMm      = 2;   // spec §2.3.3 minimum
+            int     cutEvery      = 1;   // ESC i A
+        };
+
+        // Spec §4 p.22 (Table 4): the same 32-byte layout as the TD-2000.
+        using PrinterInfoFields = brother::raster::types::StatusBlockFields<
+            ModelCode, ErrorInformation1Fields, ErrorInformation2Fields, MediaType, NotificationNumber>;
+        static_assert(sizeof(PrinterInfoFields) == 32, "PrinterInfoFields must match protocol size (32 bytes)");
         using PrinterInfo = PackedProtocolBlock<PrinterInfoFields, 32>;
-
-        struct JobData {
-            ModelVariant variant         = ModelVariant::PtP750W;
-            bool         useCompression  = true;   // MANDATORY for this family
-            int          bytesPerLine    = 16;     // 128 dots / 8 = 16 bytes (fixed)
-        };
-
-        // PAPPL reads pappl_media_col_s margins as hundredths of a millimetre,
-        // not as printer dots. Feed margins sent by ESC i d are dots; see minFeedMargin.
-        struct Margins {
-            util::units::MediaSize left{};
-            util::units::MediaSize right{};
-            util::units::MediaSize top{};
-            util::units::MediaSize bottom{};
-        };
     }
 
-    // -----------------------------------------------------------------------
-    // Command classes – identical wire format to TD-2000; reproduced here so
-    // the pte550w driver is fully self-contained and does not depend on the
-    // td2000 library target.
-    // -----------------------------------------------------------------------
+    // PAPPL printer reasons (pappl_preason_t bits) for a status block. Error bits count
+    // in every status type, not only in "error occurred".
+    [[nodiscard]] unsigned statusReasons(const types::PrinterInfo& info);
+    // Always false: the PT family has no cooling or pause notification (spec p.29).
+    [[nodiscard]] bool pausesPrinting(const types::PrinterInfo& info);
+    [[nodiscard]] bool resumesPrinting(const types::PrinterInfo& info);
+
     namespace commands
     {
-        // Raw command byte sequences (spec §4)
-        constexpr std::array<uint8_t, 3> status_information_request  {0x1B, 0x69, 0x53};
-        constexpr std::array<uint8_t, 3> switch_dynamic_command_mode {0x1B, 0x69, 0x61};
-        constexpr std::array<uint8_t, 3> print_information           {0x1B, 0x69, 0x7A};
-        constexpr std::array<uint8_t, 3> various_mode_settings       {0x1B, 0x69, 0x4D};
-        constexpr std::array<uint8_t, 3> advanced_mode_settings      {0x1B, 0x69, 0x4B};
-        constexpr std::array<uint8_t, 3> specify_page_number         {0x1B, 0x69, 0x41};
-        constexpr std::array<uint8_t, 3> specify_margin_amount       {0x1B, 0x69, 0x64};
-        constexpr std::array<uint8_t, 4> switch_auto_status_notify   {0x1B, 0x69, 0x21, 0x00};
-        constexpr std::array<uint8_t, 1> select_compression_mode     {0x4D};
-        // Spec §3 p.22: 'G' (47h), NOT 'g' (67h) as used by TD-2000.
-        constexpr std::array<uint8_t, 1> raster_graphics_transfer    {0x47};
-        constexpr std::array<uint8_t, 1> zero_raster_graphics        {0x5A};
-        constexpr std::array<uint8_t, 1> print_cmd                   {0x0C};
-        constexpr std::array<uint8_t, 1> print_with_feeding          {0x1A};
+        using brother::raster::commands::Initialize;
+        using brother::raster::commands::Invalidate;
+        using brother::raster::commands::Print;
+        using brother::raster::commands::PrintInformation;
+        using brother::raster::commands::PrintWithFeeding;
+        using brother::raster::commands::SelectCompressionMode;
+        using brother::raster::commands::SpecifyMarginAmount;
+        using brother::raster::commands::StatusInformationRequest;
+        using brother::raster::commands::SwitchDynamicCommandMode;
+        using brother::raster::commands::ZeroRasterGraphics;
 
-        // Spec §2.1 p.5: 100-byte invalidate for PT family (not 200 like TD).
-        class Invalidate {
-        public:
-            [[nodiscard]] std::vector<uint8_t> get() const noexcept
-            { return std::vector<uint8_t>(100, 0x00); }
-        };
+        // Spec §4 p.33: ESC i M. Bit 6 is auto cut, bit 7 is mirror.
+        using VariousModeSettings  = brother::raster::commands::ModeSettings<0x4D, types::VariousModeSettings>;
+        // Spec §4 p.33: ESC i K, advanced mode settings.
+        using AdvancedModeSettings = brother::raster::commands::ModeSettings<0x4B, types::AdvancedModeSettings>;
+        // Spec §3 p.22: 'G' (47h) with a 16-bit count, not 'g' (67h) as on the TD-2000.
+        using RasterGraphicsTransfer =
+            brother::raster::commands::RasterTransfer<0x47, brother::raster::commands::RasterCount::LittleEndian16>;
 
-        class Initialize {
-        public:
-            [[nodiscard]] std::vector<uint8_t> get() const noexcept
-            { return {0x1B, 0x40}; }
-        };
-
-        class StatusInformationRequest {
-        public:
-            [[nodiscard]] std::array<uint8_t, 3> get() const noexcept
-            { return status_information_request; }
-        };
-
-        class SwitchDynamicCommandMode {
-        public:
-            explicit SwitchDynamicCommandMode(const types::CommandMode mode)
-                : commandMode(mode) {}
-            [[nodiscard]] std::vector<uint8_t> get() const noexcept {
-                std::vector<uint8_t> data;
-                data.reserve(switch_dynamic_command_mode.size() + 1);
-                data.insert(data.end(),
-                            switch_dynamic_command_mode.begin(),
-                            switch_dynamic_command_mode.end());
-                data.push_back(static_cast<uint8_t>(commandMode));
-                return data;
-            }
-        private:
-            types::CommandMode commandMode;
-        };
-
-        class PrintInformation {
-        public:
-            explicit PrintInformation(const types::PrintInfoFields info)
-                : printInfo(info) {}
-            [[nodiscard]] std::vector<uint8_t> get() const noexcept {
-                std::vector<uint8_t> data;
-                data.reserve(print_information.size() + sizeof(printInfo));
-                data.insert(data.end(),
-                            print_information.begin(), print_information.end());
-                const auto bytes = std::bit_cast<std::array<uint8_t, 10>>(printInfo);
-                data.insert(data.end(), bytes.begin(), bytes.end());
-                return data;
-            }
-            [[nodiscard]] types::PrintInfoFields fields() const noexcept { return printInfo; }
-        private:
-            types::PrintInfoFields printInfo{};
-        };
-
-        class VariousModeSettings {
-        public:
-            explicit VariousModeSettings(const types::VariousModeSettings settings)
-                : modeSettings(settings) {}
-            [[nodiscard]] std::vector<uint8_t> get() const noexcept {
-                std::vector<uint8_t> data;
-                data.reserve(various_mode_settings.size() + modeSettings.raw.size());
-                data.insert(data.end(),
-                            various_mode_settings.begin(), various_mode_settings.end());
-                data.insert(data.end(),
-                            modeSettings.raw.begin(), modeSettings.raw.end());
-                return data;
-            }
-        private:
-            types::VariousModeSettings modeSettings;
-        };
-
-        class AdvancedModeSettings {
-        public:
-            explicit AdvancedModeSettings(const types::AdvancedModeSettings settings)
-                : modeSettings(settings) {}
-            [[nodiscard]] std::vector<uint8_t> get() const noexcept {
-                std::vector<uint8_t> data;
-                data.reserve(advanced_mode_settings.size() + modeSettings.raw.size());
-                data.insert(data.end(),
-                            advanced_mode_settings.begin(), advanced_mode_settings.end());
-                data.insert(data.end(),
-                            modeSettings.raw.begin(), modeSettings.raw.end());
-                return data;
-            }
-        private:
-            types::AdvancedModeSettings modeSettings;
-        };
+        constexpr std::array<uint8_t, 3> specify_page_number       {0x1B, 0x69, 0x41};
+        constexpr std::array<uint8_t, 4> switch_auto_status_notify {0x1B, 0x69, 0x21, 0x00};
 
         class SpecifyPageNumber {
         public:
-            explicit SpecifyPageNumber(const uint8_t pageCount)
-                : count(pageCount) {}
-            [[nodiscard]] std::vector<uint8_t> get() const noexcept {
-                std::vector<uint8_t> data;
-                data.reserve(specify_page_number.size() + 1);
-                data.insert(data.end(),
-                            specify_page_number.begin(), specify_page_number.end());
+            explicit SpecifyPageNumber(const uint8_t pageCount) : count(pageCount) {}
+            [[nodiscard]] std::vector<uint8_t> get() const
+            {
+                std::vector<uint8_t> data{specify_page_number.begin(), specify_page_number.end()};
                 data.push_back(count);
                 return data;
             }
@@ -411,104 +223,25 @@ namespace drivers::pte550w
 
         class SwitchAutoStatusNotify {
         public:
-            [[nodiscard]] std::vector<uint8_t> get() const noexcept {
-                return {switch_auto_status_notify.begin(),
-                        switch_auto_status_notify.end()};
+            [[nodiscard]] std::vector<uint8_t> get() const
+            {
+                return {switch_auto_status_notify.begin(), switch_auto_status_notify.end()};
             }
-        };
-
-        class SpecifyMarginAmount {
-        public:
-            SpecifyMarginAmount(const int before, const int after)
-                : beforeMargin(before), afterMargin(after) {}
-            [[nodiscard]] std::vector<uint8_t> get() const noexcept {
-                std::vector<uint8_t> data;
-                data.reserve(specify_margin_amount.size() + 2);
-                data.insert(data.end(),
-                            specify_margin_amount.begin(), specify_margin_amount.end());
-                data.push_back(static_cast<uint8_t>(beforeMargin));
-                data.push_back(static_cast<uint8_t>(afterMargin));
-                return data;
-            }
-        private:
-            int beforeMargin;
-            int afterMargin;
-        };
-
-        class SelectCompressionMode {
-        public:
-            explicit SelectCompressionMode(const types::CompressionMode mode)
-                : compressionMode(mode) {}
-            [[nodiscard]] std::vector<uint8_t> get() const noexcept {
-                std::vector<uint8_t> data;
-                data.reserve(select_compression_mode.size() + 1);
-                data.insert(data.end(),
-                            select_compression_mode.begin(),
-                            select_compression_mode.end());
-                data.push_back(static_cast<uint8_t>(compressionMode));
-                return data;
-            }
-        private:
-            types::CompressionMode compressionMode;
-        };
-
-        class RasterGraphicsTransfer {
-        public:
-            RasterGraphicsTransfer(int byteCount, const std::vector<uint8_t>& data)
-                : numberOfBytes(byteCount), raster(data) {}
-            [[nodiscard]] std::vector<uint8_t> get() const noexcept {
-                std::vector<uint8_t> data;
-                data.reserve(raster_graphics_transfer.size() + 2 + raster.size());
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wstringop-overflow"
-#endif
-                data.insert(data.end(),
-                            raster_graphics_transfer.begin(),
-                            raster_graphics_transfer.end());
-                data.push_back(static_cast<uint8_t>(numberOfBytes & 0xFF));
-                data.push_back(static_cast<uint8_t>((numberOfBytes >> 8) & 0xFF));
-                data.insert(data.end(), raster.begin(), raster.end());
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic pop
-#endif
-                return data;
-            }
-        private:
-            int                   numberOfBytes;
-            std::vector<uint8_t>  raster;
-        };
-
-        class ZeroRasterGraphics {
-        public:
-            [[nodiscard]] std::vector<uint8_t> get() const noexcept
-            { return {0x5A}; }
-        };
-
-        class Print {
-        public:
-            [[nodiscard]] std::vector<uint8_t> get() const noexcept
-            { return {0x0C}; }
-        };
-
-        class PrintWithFeeding {
-        public:
-            [[nodiscard]] std::vector<uint8_t> get() const noexcept
-            { return {0x1A}; }
         };
     }
 
     // -----------------------------------------------------------------------
-    // USB identifiers  (spec Appendix, cross-checked with USB ID database)
+    // USB identifiers, spec Appendix "USB specifications"
     // -----------------------------------------------------------------------
     namespace usb
     {
         constexpr unsigned int vendorId = 0x04F9;
 
-        const std::map<types::ModelCode, unsigned int> productId = {
-            {types::ModelCode::PtE550W,  0x2060},
-            {types::ModelCode::PtP750W,  0x2062},
-            {types::ModelCode::PtP710BT, 0x2064},
+        // Keep dist/60-br-thermal.rules in step with this table.
+        const std::map<types::ModelVariant, unsigned int> productId = {
+            {types::ModelVariant::PtE550W,  0x2060},
+            {types::ModelVariant::PtP750W,  0x2062},
+            {types::ModelVariant::PtP710BT, 0x20AF},
         };
 
         constexpr int interfaceNumber = 0;
@@ -521,18 +254,17 @@ namespace drivers::pte550w
     // Driver-level configuration tables
     // -----------------------------------------------------------------------
 
-    // All three models share the same 128-dot (16-byte) print head.
-    // The P750W supports an optional 360-dpi mode; E550W and P710BT are 180-dpi only.
-    inline const std::map<types::ModelVariant, types::Resolution> resolutions {
-        {types::ModelVariant::PtE550W,   {180, 180}},
-        {types::ModelVariant::PtP750W,   {180, 180}},  // expose 180 dpi as default
-        {types::ModelVariant::PtP710BT,  {180, 180}},
-    };
-
-    // Spec §2.3.1: "180 dpi high, 360 dpi wide" — height-to-width 1:2.
-    inline const std::vector<types::Resolution> extraResolutionsP750W {
-        {360, 180},
-    };
+    // Only 180x180 dpi is advertised.
+    //
+    // The printers also have 180 dpi across x 360 dpi along the feed (spec §2.3.1,
+    // ESC i K bit 6). A PT-P750W printed at 360 dpi along the feed on 2026-11-23, and
+    // pageSettings has the commands for it. It is not advertised: the image filter of
+    // PAPPL (job-filter.c, fit and fill) assumes square pixels, thus a PNG or JPEG prints
+    // at half its length. To enable it, add {180, 360} here. PAPPL then uses the last
+    // entry for print-quality high and entry size / 2 for normal.
+    inline constexpr std::array<types::Resolution, 1> resolutions {{
+        {180, 180},
+    }};
 
     // All models: 128 print dots = 16 bytes per raster line (spec §2.3, §4 p.31).
     inline const std::map<types::ModelVariant, uint8_t> lineWidth {
@@ -541,18 +273,8 @@ namespace drivers::pte550w
         {types::ModelVariant::PtP710BT,  16},
     };
 
-    // Left/right/top/bottom margins, in PAPPL's hundredths of a millimetre.
-    // These printers use TZe tape with symmetric side margins; top/bottom come from
-    // the feed margin setting sent via ESC i d (spec §4 p.30, §2.6).
-    inline const std::map<types::ModelVariant, types::Margins> margins {
-        {types::ModelVariant::PtE550W,  {}},
-        {types::ModelVariant::PtP750W,  {}},
-        {types::ModelVariant::PtP710BT, {}},
-    };
-
-    // Minimum feed margin.  Spec §2.6: for 180-dpi models the minimum is 14 dots;
-    // for a 360-dpi pass it doubles to 28 dots. ESC i d carries dots, unlike the
-    // PAPPL margins above which are hundredths of a millimetre.
+    // Minimum feed margin at 180 dpi along the feed (spec §2.3.3 p.17). It doubles at
+    // 360 dpi. ESC i d carries dots, unlike the PAPPL margins above.
     inline const std::map<types::ModelVariant, util::units::DotCount> minFeedMargin {
         {types::ModelVariant::PtE550W,   14 * util::units::dot},
         {types::ModelVariant::PtP750W,   14 * util::units::dot},
@@ -568,11 +290,12 @@ namespace drivers::pte550w
     // Standard PWG convention: x-dimension = tape width (cross-feed),
     // y-dimension = label length (feed direction).
     // Kate landscape sends x=2400 (24mm tape), y=10000 (100mm label) — matches this.
+    // The narrowest TZe tape is 3.5 mm (spec §2.3.2, ID 263).
     constexpr std::array<const char*, 7> defaultMedia {
         "roll_default_24x100mm",
-        "roll_min_4x4mm",
+        "roll_min_3.5x4.4mm",   // spec §2.3.4: 4.4 mm minimum length
         "roll_max_24x1000mm",
-        "custom_min_4x4mm",
+        "custom_min_3.5x4.4mm",
         "custom_max_24x1000mm",
         "roll_current_12x100mm",
         "roll_current_18x100mm",
@@ -583,44 +306,107 @@ namespace drivers::pte550w
         "labels-continuous", // alias used by some print stacks
     };
 
-    const std::string driverName {"brother_pte550w_p750w_p710bt"};
-    const std::string driverInfo {"Brother PT-E550W/PT-P750W/PT-P710BT"};
-    const std::set<std::string_view> supportedPrinters {
-        "PT-E550W", "PT-P750W", "PT-P710BT"
-    };
+    inline constexpr const char* driverName = "brother_pte550w_p750w_p710bt";
+    inline constexpr const char* driverInfo = "Brother PT-E550W/PT-P750W/PT-P710BT";
 
-    static std::map<std::string, types::PrinterInfo> printerStatus{};
-    static std::map<std::string, bool>               printerStatusPolling{};
-    static std::mutex                                printerStateMutex{};
+    // Spec §2.3.4 p.18: maximum length 1000 mm.
+    inline constexpr uint32_t maxRasterLines180 = 7086;
+    inline constexpr uint32_t maxRasterLines360 = 14172;
 
-    // -----------------------------------------------------------------------
-    // Public API
-    // -----------------------------------------------------------------------
-    namespace callbacks
+    // PAPPL keeps the pointers of the option names, thus they have static storage.
+    // The options are keywords and ranges. PAPPL does not show a boolean vendor option
+    // in the "options" subcommand.
+    namespace vendorOptions
     {
-        void applyPrinterStatus(pappl_printer_t *printer,
-                                const types::PrinterInfo &info,
-                                const char *uri);
-        bool waitForPrinterResume(pappl_job_t *job, pappl_device_t *device,
-                                  pappl_printer_t *printer, const char *uri);
-        bool print(pappl_job_t *job, pappl_pr_options_t *options,
-                   pappl_device_t *device);
-        bool startJob(pappl_job_t *job, pappl_pr_options_t *options,
-                      pappl_device_t *device);
-        bool startPage(pappl_job_t *job, pappl_pr_options_t *options,
-                       pappl_device_t *device, unsigned pageNumber);
-        bool writeLine(pappl_job_t *job, pappl_pr_options_t *options,
-                       pappl_device_t *device, unsigned pageNumber,
-                       const unsigned char *pixels);
-        bool endPage(pappl_job_t *job, pappl_pr_options_t *options,
-                     pappl_device_t *device, unsigned pageNumber);
-        bool endJob(pappl_job_t *job, pappl_pr_options_t *options,
-                    pappl_device_t *device);
-        bool getStatus(pappl_printer_t *printer);
+        inline constexpr const char* cutMode       = "brother-cut-mode";
+        inline constexpr const char* chainPrinting = "brother-chain-printing";
+        inline constexpr const char* margin        = "brother-margin";
+        inline constexpr const char* cutEvery      = "brother-cut-every";
+
+        inline constexpr std::array<const char*, 4> cutModeValues{"full", "half", "none", "special-tape"};
+        inline constexpr std::array<const char*, 2> chainPrintingValues{"off", "on"};
+
+        // Spec §2.3.3 p.17: 2 mm (14 dots) to 127 mm (900 dots) at 180 dpi. The paper
+        // table of the printer gives the same limits (BrMinMargin, BrMaxMargin).
+        inline constexpr int marginMinMm = 2;
+        inline constexpr int marginMaxMm = 127;
+
+        // With auto cut and a margin below this value, the printer feeds and cuts
+        // approximately 24.5 mm of tape before the print. The paper table of the printer
+        // (nMinNoCutFeed_dot) gives 175 for each TZe tape. The 172 of spec §2.3.3 is
+        // the value of the HS 23.6 mm tube only. The driver does not prevent a smaller
+        // margin.
+        inline constexpr int noPrecutFeedDots = 175;
+
+        // Spec ESC i A: 1 to 99.
+        inline constexpr int cutEveryMin = 1;
+        inline constexpr int cutEveryMax = 99;
     }
 
-    bool updateDriverData(pappl_pr_driver_data_t *driverData,
-                          const std::string_view &model);
+    [[nodiscard]] std::optional<types::CutMode> parseCutMode(std::string_view value) noexcept;
+    [[nodiscard]] const char* cutModeName(types::CutMode mode) noexcept;
+
+    // ESC i M and ESC i K for a cut mode. The bit positions agree with the command
+    // builder of P-touch Editor Lite in the PT-P750W firmware.
+    // ESC i K bit 3 has the opposite sense: 1 is "no chain printing".
+    // The PT-P710BT has no half cut (spec ESC i K), thus Half becomes Full there.
+    [[nodiscard]] types::ModeBytes buildModeBytes(types::CutMode mode, bool chainPrinting,
+                                                  types::ModelVariant variant, bool highResolution) noexcept;
+
+    // The per-page decisions of startPage.
+    struct PageSettings
+    {
+        bool     highResolution;   // ESC i K bit 6
+        uint16_t feedMarginDots;   // ESC i d
+        uint32_t rasterLines;      // ESC i z {n5..n8}, clamped to the maximum length
+        bool     sendCutEvery;     // ESC i A. Spec §3 p.22: the PT-P710BT does not support it.
+        uint8_t  cutEvery;         // ESC i A {n1}
+    };
+
+    // feedDpi is the job resolution along the feed (HWResolution[1]): 180 or 360.
+    // The margin of `options` is millimetres. The dot count doubles at 360 dpi.
+    [[nodiscard]] PageSettings pageSettings(types::ModelVariant variant, unsigned feedDpi, unsigned cupsHeight,
+                                            const types::JobOptions& options = {});
+
+    // One TZe tape width. Values from spec §2.3.2 and §2.3.5. The paper table of the
+    // PT-P750W firmware (wPinOffsetLeft, nPaperWidthRes_dot) gives the same values.
+    struct Tape
+    {
+        uint8_t statusWidth;      // status block offset 10 and ESC i z {n3}; 4 is the 3.5 mm tape
+        int     widthPwg;         // PAPPL media width, hundredths of a millimetre
+        int     sideMarginDots;   // tape dots that the head cannot print, on each side
+    };
+
+    inline constexpr std::array<Tape, 6> tapes{{
+        {4, 350, 0},
+        {6, 600, 5},
+        {9, 900, 7},
+        {12, 1200, 7},
+        {18, 1800, 8},
+        {24, 2400, 21},
+    }};
+
+    // The tape for a PAPPL media width, or for a status width code. Empty: not a TZe width.
+    [[nodiscard]] std::optional<Tape> tapeForMediaWidth(util::units::MediaSize width) noexcept;
+    [[nodiscard]] std::optional<Tape> tapeForStatusWidth(uint8_t statusWidth) noexcept;
+
+    // The side margin of a tape for PAPPL, rounded up to a hundredth of a millimetre.
+    [[nodiscard]] util::units::MediaSize sideMargin(const Tape& tape) noexcept;
+
+    // ESC i z {n3}. The 3.5 mm tape is 4 (spec status table (3) (a)).
+    [[nodiscard]] uint8_t tapeWidthCode(util::units::MediaSize width) noexcept;
+
+    // ESC i z payload. PI_RECOVER and PI_WIDTH as in the spec sample (§2.2.3 p.11).
+    // PI_KIND is not set: with it, a tape type other than {n2} gives an error status.
+    [[nodiscard]] types::PrintInfoFields printInformation(unsigned mediaWidthMm, uint32_t rasterLines,
+                                                          types::PageType pageType);
+
+    // true when this driver handles the IEEE 1284 MDL `model`.
+    inline bool supportsModel(const std::string_view model) { return modelVariantMap.contains(model); }
+
+    // driverAttrs gets the "-supported" and "-default" attributes of the vendor options.
+    bool updateDriverData(pappl_pr_driver_data_t *driverData, const std::string_view &model,
+                          ipp_t** driverAttrs = nullptr);
 }
 
 #endif // BR_THERMAL_PTE550W_H

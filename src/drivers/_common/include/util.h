@@ -24,12 +24,16 @@
 #include <ranges>
 #include <concepts>
 #include <span>
+#include <exception>
 #include <string>
 
 extern "C" {
 #include <pappl/base.h>
 #include <pappl/device.h>
+#include <pappl/job.h>
 #include <pappl/log.h>
+#include <pappl/printer.h>
+#include <pappl/system.h>
 }
 
 namespace util
@@ -37,6 +41,9 @@ namespace util
     // The debug dump goes to the service state directory. Without systemd, it goes to the PAPPL temporary directory.
     std::string debugDumpPath(int jobId);
 
+    // The device belongs to PAPPL. The job device is closed by PAPPL after rendjob_cb,
+    // and a status device by papplPrinterCloseDevice. A close here would free memory
+    // that PAPPL uses again.
     template<std::ranges::contiguous_range R>
     requires std::same_as<std::ranges::range_value_t<R>, uint8_t>
     bool writeToDevice(const R& data, pappl_device_t* device, const int jobId, bool debug = false)
@@ -46,27 +53,23 @@ namespace util
             return false;
         }
 
+        const auto size = std::ranges::size(data);
         if (debug)
         {
             const std::string filepath = debugDumpPath(jobId);
-            std::ofstream debug_file(filepath,
-                                     std::ios::app | std::ios::binary);
+            std::ofstream debug_file(filepath, std::ios::app | std::ios::binary);
             if (debug_file.is_open())
             {
                 debug_file.write(reinterpret_cast<const char*>(std::ranges::data(data)),
-                               static_cast<long>(std::ranges::size(data)));
-                debug_file.close();
+                                 static_cast<long>(size));
             }
             const auto msg = std::format("Dumping data to file: {}", filepath);
             papplLogDevice(msg.c_str(), nullptr);
         }
 
-
-        if (::papplDeviceWrite(device, std::ranges::data(data), std::ranges::size(data)) 
-            != static_cast<ssize_t>(std::ranges::size(data)))
+        if (::papplDeviceWrite(device, std::ranges::data(data), size) != static_cast<ssize_t>(size))
         {
             papplLogDevice("Failed write to device", nullptr);
-            papplDeviceClose(device);
             return false;
         }
         papplDeviceFlush(device);
@@ -74,6 +77,34 @@ namespace util
         return true;
     }
     
+    // The MDL key of an IEEE 1284 device ID. Empty when the ID is null or has no MDL.
+    std::string modelFromDeviceId(const char* deviceId);
+
+    // PAPPL is C. An exception that leaves a callback ends the server. Each callback
+    // runs inside one of these guards, which turns an exception into `false`.
+    void logCallbackFailure(pappl_job_t* job, const char* what) noexcept;
+    void logCallbackFailure(pappl_printer_t* printer, const char* what) noexcept;
+    void logCallbackFailure(pappl_system_t* system, const char* what) noexcept;
+
+    template<typename Owner, std::invocable F>
+    requires std::convertible_to<std::invoke_result_t<F>, bool>
+    bool guarded(Owner* owner, F&& body) noexcept
+    {
+        try
+        {
+            return static_cast<bool>(body());
+        }
+        catch (const std::exception& e)
+        {
+            logCallbackFailure(owner, e.what());
+        }
+        catch (...)
+        {
+            logCallbackFailure(owner, "non-standard exception");
+        }
+        return false;
+    }
+
     uint8_t reverseBitOrder(uint8_t value);
     std::vector<uint8_t> mirrorLine(const std::span<const uint8_t> &data);
     std::vector<uint8_t> compressLine(const std::vector<unsigned char>& data);
@@ -93,6 +124,31 @@ namespace util
     std::vector<uint8_t> buildHeadLine(const std::span<const uint8_t> &delivered,
                                        size_t deliveredDots,
                                        size_t headDots);
+
+    enum class ReadResult : uint8_t
+    {
+        Packet,  // a full status block with the 0x80 head mark
+        NoData,  // zero-length, short or unknown data; try again later
+        Error,   // papplDeviceRead failed; the device is gone
+    };
+
+    // The USB read in PAPPL can block for up to 10 s when the printer sends no data.
+    template<typename Block>
+    requires requires(Block b) { { b.raw.data() } -> std::convertible_to<uint8_t*>; { b.raw.size() }; }
+    ReadResult readStatusPacket(pappl_device_t* device, Block& info) noexcept
+    {
+        constexpr uint8_t printHeadMark = 0x80;
+        const auto result = papplDeviceRead(device, info.raw.data(), info.raw.size());
+        if (result < 0)
+        {
+            return ReadResult::Error;
+        }
+        if (result == static_cast<ssize_t>(info.raw.size()) && info.raw.front() == printHeadMark)
+        {
+            return ReadResult::Packet;
+        }
+        return ReadResult::NoData;
+    }
 }
 
 #endif //BR_THERMAL_UTIL_H

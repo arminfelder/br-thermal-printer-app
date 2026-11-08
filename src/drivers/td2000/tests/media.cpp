@@ -17,13 +17,18 @@
 // Created by armin on 15.02.26.
 //
 
+#include "units.h"
+#include <catch2/catch_message.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
+#include <cups/cups.h>
+#include <mp-units/systems/si/unit_symbols.h>
+#include <string>
 #include <string_view>
 
 extern "C" {
-#include <cups/cups.h>
 }
 
 #include "td2000.h"
@@ -431,23 +436,17 @@ TEST_CASE("printInfoMedia - ESC i z agrees with the ESC i U record", "[media][pr
 
         const auto pi = printInfoMedia(info, MediaType::ContinuousLengthTape, 100 * mm);
         REQUIRE(pi.width == 57);         // the tape, not the requested 50
-        REQUIRE(pi.length == 100);       // the job length
-        REQUIRE(pi.lengthValid);
     }
 
-    SECTION("continuous length above 255mm cannot use one byte") {
-        const auto pi = printInfoMedia(td2x2x::_58mm, MediaType::ContinuousLengthTape, 1000 * mm);
-        REQUIRE(pi.width == 58);
-        REQUIRE_FALSE(pi.lengthValid);
-        REQUIRE(pi.length == 0);         // never a truncated 1000 & 0xFF == 232
-    }
-
-    SECTION("continuous length at the one-byte boundary") {
-        const auto at = printInfoMedia(td2x2x::_58mm, MediaType::ContinuousLengthTape, 255 * mm);
-        REQUIRE(at.lengthValid);
-        REQUIRE(at.length == 255);
-        const auto over = printInfoMedia(td2x2x::_58mm, MediaType::ContinuousLengthTape, 256 * mm);
-        REQUIRE_FALSE(over.lengthValid);
+    SECTION("continuous tape has no media length") {
+        // Raster spec 4, table (3) (a): continuous media length is fixed at 00h. The
+        // spec sample (2.1) sends PI_KIND | PI_WIDTH | PI_RECOVER without PI_LENGTH.
+        for (const auto length : {1 * mm, 100 * mm, 255 * mm, 1000 * mm}) {
+            const auto pi = printInfoMedia(td2x2x::_58mm, MediaType::ContinuousLengthTape, length);
+            REQUIRE(pi.width == 58);
+            REQUIRE(pi.length == 0);
+            REQUIRE_FALSE(pi.lengthValid);
+        }
     }
 }
 
