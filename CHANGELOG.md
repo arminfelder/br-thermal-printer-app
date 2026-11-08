@@ -1,3 +1,9 @@
+## v0.7.6 (2026-11-08)
+
+### Fix
+
+- **udev**: apply permissions to already-connected printers
+
 ## v0.7.5 (2026-11-08)
 
 ### Fix
