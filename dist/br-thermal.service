@@ -6,6 +6,8 @@ Wants=br-thermal-autoadd.service
 
 [Service]
 Type=exec
+# Without this, PAPPL writes the state file to /tmp because HOME is /nonexistent.
+Environment=XDG_CONFIG_HOME=/var/lib/br-thermal
 EnvironmentFile=-/etc/default/br-thermal
 StandardOutput=journal
 StandardError=journal
