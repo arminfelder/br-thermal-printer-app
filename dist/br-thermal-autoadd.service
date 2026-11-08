@@ -1,5 +1,5 @@
 [Unit]
-Description=scan for connected printers
+Description=Scan for connected Brother thermal printers
 After=br-thermal.service
 Requires=br-thermal.service
 
@@ -11,3 +11,37 @@ Environment=TMPDIR=/run/br-thermal
 PrivateTmp=true
 SupplementaryGroups=plugdev
 ExecStart=/usr/sbin/br-thermal autoadd
+
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/run/br-thermal
+
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+
+NoNewPrivileges=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+UMask=0077
+
+ProtectProc=invisible
+ProcSubset=pid
+
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+MemoryDenyWriteExecute=true
+
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+
+# PAPPL 1.3 (Debian trixie) scans USB in the autoadd client. libusb needs AF_NETLINK.
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+# RestrictAddressFamilies already blocks IP sockets. This is a second barrier.
+IPAddressDeny=any

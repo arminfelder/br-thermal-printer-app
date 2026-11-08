@@ -29,7 +29,6 @@ SupplementaryGroups=lp plugdev
 
 RuntimeDirectory=br-thermal
 StateDirectory=br-thermal
-LogsDirectory=br-thermal
 
 # ---------------------------------------------------------------------------
 # Filesystem
