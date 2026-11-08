@@ -1,3 +1,9 @@
+br-thermal (0.7.5-1) unstable; urgency=medium
+
+  * **systemd**: move PAPPL IPC socket out of shared /tmp
+
+ -- github-actions <github-actions@br-thermal>  Sun, 08 Nov 2026 14:28:33 +0000
+
 br-thermal (0.7.4-1) unstable; urgency=medium
 
   * **systemd**: store PAPPL state in /var/lib/br-thermal

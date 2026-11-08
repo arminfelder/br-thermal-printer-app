@@ -1,3 +1,9 @@
+## v0.7.5 (2026-11-08)
+
+### Fix
+
+- **systemd**: move PAPPL IPC socket out of shared /tmp
+
 ## v0.7.4 (2026-11-08)
 
 ### Fix
