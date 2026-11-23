@@ -73,6 +73,7 @@ include_directories(include)
 include(CTest)
 if (BUILD_TESTING)
     enable_testing()
+    include(${CMAKE_SOURCE_DIR}/cmake/Catch2.cmake)
 endif ()
 
 # ==============================================================================

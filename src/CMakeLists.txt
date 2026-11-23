@@ -32,6 +32,7 @@ endif ()
 
 target_compile_definitions(br_thermal PRIVATE BR_THERMAL_VERSION="${PROJECT_VERSION}")
 target_compile_features(br_thermal PUBLIC cxx_std_23)
-target_link_libraries(br_thermal PUBLIC PAPPL::pappl CUPS::cups drivers::td2000 drivers::pte550w)
-
+# Each br_add_driver call adds its target to BR_THERMAL_DRIVERS.
 add_subdirectory(drivers)
+get_property(br_thermal_drivers GLOBAL PROPERTY BR_THERMAL_DRIVERS)
+target_link_libraries(br_thermal PUBLIC PAPPL::pappl CUPS::cups drivers::utils ${br_thermal_drivers})

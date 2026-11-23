@@ -15,14 +15,21 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
+#include <cstdint>
 #include <cstdlib>
-#include <ranges>
+#include <pappl/base.h>
+#include <pappl/device.h>
 #include <span>
+#include <stdlib.h>
 #include <string>
 #include <vector>
 
+#include <catch2/catch_message.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include "fake_device.h"
+#include "raster_pipeline.h"
 #include "util.h"
 
 
@@ -41,6 +48,44 @@ TEST_CASE("TIFF PackBits" )
     };
 
     REQUIRE(result == expected);
+}
+
+TEST_CASE("TIFF PackBits - output longer than the line becomes one literal run", "[compressLine]")
+{
+    // PT spec p.35, TD spec p.31: more than 16 bytes of compressed data for a 16-byte
+    // line is sent as all different data, thus 17 bytes with the length byte.
+    // Pairs and single bytes alternate, thus every 3 input bytes give 4 output bytes.
+    std::vector<uint8_t> data;
+    for (uint8_t i = 0; data.size() < 16; ++i)
+    {
+        data.push_back(i);
+        data.push_back(i);
+        data.push_back(static_cast<uint8_t>(0x80U | i));
+    }
+    data.resize(16);
+
+    const auto result = compressLine(data);
+
+    REQUIRE(result.size() == 17);
+    REQUIRE(result[0] == 15);
+    REQUIRE(std::ranges::equal(std::span(result).subspan(1), data));
+}
+
+TEST_CASE("TIFF PackBits - 56-byte TD line that grows is sent as 57 bytes", "[compressLine]")
+{
+    std::vector<uint8_t> data;
+    for (uint8_t i = 0; data.size() < 56; ++i)
+    {
+        data.push_back(i);
+        data.push_back(i);
+        data.push_back(static_cast<uint8_t>(0x80U | i));
+    }
+    data.resize(56);
+
+    const auto result = compressLine(data);
+
+    REQUIRE(result.size() == 57);
+    REQUIRE(result[0] == 55);
 }
 TEST_CASE("reverseBitOrder - boundary values", "[reverseBitOrder]")
 {
@@ -189,6 +234,21 @@ TEST_CASE("debugDumpPath - falls back to the PAPPL temporary directory", "[debug
     ::setenv("STATE_DIRECTORY", "", 1);
     REQUIRE(debugDumpPath(3) == std::string(papplGetTempDir()) + "/br-thermal-debug-3.dump");
     ::unsetenv("STATE_DIRECTORY");
+}
+
+TEST_CASE("writeToDevice - leaves the device open", "[writeToDevice]")
+{
+    test::FakeDeviceScript script{};
+    pappl_device_t* device = test::openFakeDevice(script);
+    REQUIRE(device != nullptr);
+
+    const std::vector<uint8_t> data{0x1B, 0x40};
+    REQUIRE(writeToDevice(data, device, 1));
+    // A second write proves the handle is still usable: PAPPL owns it and closes
+    // it after rendjob_cb, thus a close here would be a double free.
+    REQUIRE(writeToDevice(data, device, 1));
+
+    papplDeviceClose(device);
 }
 
 // ---------------------------------------------------------------------------
@@ -370,4 +430,230 @@ TEST_CASE("buildHeadLine - margins match Raster Command Reference 2.3.5", "[buil
         REQUIRE(place.width == headDots);
         REQUIRE(place.right == 0);
     }
+}
+
+// ---------------------------------------------------------------------------
+// readStatusPacket
+//
+// The three outcomes must stay distinct: the drivers poll again on NoData but
+// stop on Error. A second "probe" read to tell them apart would consume the
+// printer's reply.
+// ---------------------------------------------------------------------------
+namespace
+{
+    struct FakeStatusBlock
+    {
+        std::array<uint8_t, 32> raw{};
+    };
+}
+
+TEST_CASE("readStatusPacket - full block with head mark is a packet", "[readStatusPacket]")
+{
+    test::FakeDeviceScript script{.results = {32}};
+    pappl_device_t* device = test::openFakeDevice(script);
+    REQUIRE(device != nullptr);
+
+    FakeStatusBlock block{};
+    REQUIRE(readStatusPacket(device, block) == ReadResult::Packet);
+    REQUIRE(block.raw.front() == 0x80);
+
+    papplDeviceClose(device);
+}
+
+TEST_CASE("readStatusPacket - zero-length and short reads are NoData", "[readStatusPacket]")
+{
+    test::FakeDeviceScript script{.results = {0, 5}};
+    pappl_device_t* device = test::openFakeDevice(script);
+    REQUIRE(device != nullptr);
+
+    FakeStatusBlock block{};
+    REQUIRE(readStatusPacket(device, block) == ReadResult::NoData);
+    REQUIRE(readStatusPacket(device, block) == ReadResult::NoData);
+
+    papplDeviceClose(device);
+}
+
+TEST_CASE("readStatusPacket - wrong head mark is NoData", "[readStatusPacket]")
+{
+    test::FakeDeviceScript script{.results = {32}, .firstByte = 0x00};
+    pappl_device_t* device = test::openFakeDevice(script);
+    REQUIRE(device != nullptr);
+
+    FakeStatusBlock block{};
+    REQUIRE(readStatusPacket(device, block) == ReadResult::NoData);
+
+    papplDeviceClose(device);
+}
+
+TEST_CASE("readStatusPacket - negative read is Error", "[readStatusPacket]")
+{
+    test::FakeDeviceScript script{.results = {-1}};
+    pappl_device_t* device = test::openFakeDevice(script);
+    REQUIRE(device != nullptr);
+
+    FakeStatusBlock block{};
+    REQUIRE(readStatusPacket(device, block) == ReadResult::Error);
+
+    papplDeviceClose(device);
+}
+
+TEST_CASE("JobData::takeLine - lines above the page limit are dropped", "[pipeline]")
+{
+    brother::pipeline::JobData<int> data{};
+    data.lineLimit = 2;
+    REQUIRE(data.takeLine());
+    REQUIRE(data.takeLine());
+    REQUIRE_FALSE(data.takeLine());
+}
+
+TEST_CASE("JobData::takeLine - a limit of 0 means no limit", "[pipeline]")
+{
+    brother::pipeline::JobData<int> data{};
+    for (int i = 0; i < 1000; ++i)
+    {
+        REQUIRE(data.takeLine());
+    }
+}
+
+namespace
+{
+    using TestStatus = brother::raster::types::StatusBlock<uint8_t, uint8_t, uint8_t, uint8_t, uint8_t>;
+
+    brother::pipeline::JobStartStatus checkStart(test::FakeDeviceScript& script)
+    {
+        auto* device = test::openFakeDevice(script);
+        REQUIRE(device != nullptr);
+        TestStatus info{};
+        const auto status = brother::pipeline::requestStatusAtJobStart(device, -1, info);
+        papplDeviceClose(device);
+        return status;
+    }
+}
+
+TEST_CASE("requestStatusAtJobStart - a clean reply is ready", "[pipeline]")
+{
+    test::FakeDeviceScript script{.results = {32}};
+    REQUIRE(checkStart(script) == brother::pipeline::JobStartStatus::Ready);
+}
+
+TEST_CASE("requestStatusAtJobStart - an error reply stops the job", "[pipeline]")
+{
+    // Status type (offset 18) = 02h, error occurred.
+    std::vector<uint8_t> packet(32, 0);
+    packet[0] = 0x80;
+    packet[18] = 0x02;
+    test::FakeDeviceScript script{.results = {32}, .packet = packet};
+    REQUIRE(checkStart(script) == brother::pipeline::JobStartStatus::PrinterError);
+}
+
+TEST_CASE("requestStatusAtJobStart - a read error is a device error", "[pipeline]")
+{
+    test::FakeDeviceScript script{.results = {-1}};
+    REQUIRE(checkStart(script) == brother::pipeline::JobStartStatus::DeviceError);
+}
+
+TEST_CASE("requestStatusAtJobStart - no reply does not stop the job", "[pipeline]")
+{
+    test::FakeDeviceScript script{.results = {}};
+    REQUIRE(checkStart(script) == brother::pipeline::JobStartStatus::Ready);
+}
+
+TEST_CASE("RasterTransfer - opcode and count form are independent", "[raster]")
+{
+    using brother::raster::commands::RasterCount;
+    using brother::raster::commands::RasterTransfer;
+    const std::vector<uint8_t> data{0xAA, 0xBB};
+
+    // TD-2000, QL, RJ: 'g' 00h {n}.
+    REQUIRE(RasterTransfer<0x67, RasterCount::ZeroPrefixedByte>{2, data}.get() ==
+            std::vector<uint8_t>{0x67, 0x00, 0x02, 0xAA, 0xBB});
+    // PT-E550W family: 'G' {n1} {n2}.
+    REQUIRE(RasterTransfer<0x47, RasterCount::LittleEndian16>{300, data}.get() ==
+            std::vector<uint8_t>{0x47, 0x2C, 0x01, 0xAA, 0xBB});
+    // PT-H500/P700/E500 raster reference p.37: 'g' {n1} {n2}, k = n1 + n2 * 256.
+    REQUIRE(RasterTransfer<0x67, RasterCount::LittleEndian16>{300, data}.get() ==
+            std::vector<uint8_t>{0x67, 0x2C, 0x01, 0xAA, 0xBB});
+}
+
+namespace
+{
+    constexpr uint8_t kPrintingCompleted = 0x01;
+    constexpr uint8_t kErrorOccurred     = 0x02;
+    constexpr uint8_t kPhaseChange       = 0x06;
+    constexpr uint8_t kReceiving         = 0x00;
+    constexpr uint8_t kPrinting          = 0x01;
+
+    struct DrainResult
+    {
+        brother::pipeline::JobEndStatus status;
+        int blocks;
+        size_t reads;
+    };
+
+    // No delay, 2 reads without data when idle, 5 after a "printing" block.
+    DrainResult drain(test::FakeDeviceScript& script)
+    {
+        auto* device = test::openFakeDevice(script);
+        REQUIRE(device != nullptr);
+        int blocks = 0;
+        const auto status = brother::pipeline::drainJobEnd<TestStatus>(
+            device, [&](const TestStatus&) { ++blocks; },
+            brother::pipeline::JobEndTiming{.idleReads = 2, .printingReads = 5, .delay = std::chrono::milliseconds{0}});
+        papplDeviceClose(device);
+        return {status, blocks, script.calls};
+    }
+}
+
+TEST_CASE("drainJobEnd - printing, completed, receiving is a completed job", "[pipeline]")
+{
+    test::FakeDeviceScript script{};
+    script.queue = {test::statusBlock(kPhaseChange, kPrinting), test::statusBlock(kPrintingCompleted),
+                    test::statusBlock(kPhaseChange, kReceiving)};
+    const auto result = drain(script);
+    REQUIRE(result.status == brother::pipeline::JobEndStatus::Completed);
+    REQUIRE(result.blocks == 3);
+    REQUIRE(result.reads == 3);
+}
+
+TEST_CASE("drainJobEnd - a silent printer gets only the idle time", "[pipeline]")
+{
+    test::FakeDeviceScript script{};
+    const auto result = drain(script);
+    REQUIRE(result.status == brother::pipeline::JobEndStatus::NoReply);
+    REQUIRE(result.reads == 2);
+}
+
+// ESC i S is not permitted while the printer prints, thus the wait must not stop
+// after the idle time when the printer reported the printing phase.
+TEST_CASE("drainJobEnd - the wait is longer after a printing block", "[pipeline]")
+{
+    test::FakeDeviceScript script{};
+    script.queue = {test::statusBlock(kPhaseChange, kPrinting)};
+    const auto result = drain(script);
+    REQUIRE(result.status == brother::pipeline::JobEndStatus::Timeout);
+    REQUIRE(result.reads == 6);
+}
+
+TEST_CASE("drainJobEnd - printing completed without a receiving block is a completed job", "[pipeline]")
+{
+    test::FakeDeviceScript script{};
+    script.queue = {test::statusBlock(kPhaseChange, kPrinting), test::statusBlock(kPrintingCompleted)};
+    const auto result = drain(script);
+    REQUIRE(result.status == brother::pipeline::JobEndStatus::Completed);
+    REQUIRE(result.reads == 4);
+}
+
+TEST_CASE("drainJobEnd - an error block is a printer error", "[pipeline]")
+{
+    test::FakeDeviceScript script{};
+    script.queue = {test::statusBlock(kPhaseChange, kPrinting), test::statusBlock(kErrorOccurred, 0, 0x01)};
+    const auto result = drain(script);
+    REQUIRE(result.status == brother::pipeline::JobEndStatus::PrinterError);
+    REQUIRE(result.blocks == 2);
+}
+
+TEST_CASE("drainJobEnd - a failed read is a device error", "[pipeline]")
+{
+    test::FakeDeviceScript script{.results = {-1}};
+    REQUIRE(drain(script).status == brother::pipeline::JobEndStatus::DeviceError);
 }

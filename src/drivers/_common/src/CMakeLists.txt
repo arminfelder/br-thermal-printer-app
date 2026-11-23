@@ -20,12 +20,13 @@ add_library(drivers::utils ALIAS utils)
 target_sources(utils
         PRIVATE
         util.cpp
+        driver_data.cpp
 )
 
 target_compile_features(utils PUBLIC cxx_std_23)
 
 # PUBLIC: include/units.h is part of the utils interface.
-target_link_libraries(utils PUBLIC mp-units::mp-units)
+target_link_libraries(utils PUBLIC mp-units::mp-units PAPPL::pappl CUPS::cups)
 
 target_include_directories(utils
         PUBLIC

@@ -13,46 +13,6 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-include(FetchContent)
-
-if(NOT TARGET Catch2::Catch2)
-    FetchContent_Declare(
-            Catch2
-            GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-            GIT_TAG v3.12.0
-    )
-    FetchContent_MakeAvailable(Catch2)
-    include(Catch)
-    if(TARGET Catch2)
-        target_compile_options(Catch2 PRIVATE
-                -Wno-error
-                -Wno-switch-enum
-        )
-    endif()
-endif()
-
-include(CTest)
-
-add_executable(pte550w_tests
-        commands.cpp
-)
-
-target_compile_features(pte550w_tests PRIVATE cxx_std_26)
-
-target_link_libraries(pte550w_tests
-        PRIVATE
-        Catch2::Catch2WithMain
-        CUPS::cups
-        PAPPL::pappl
-        drivers::utils
-        drivers::pte550w
-)
-
-catch_discover_tests(pte550w_tests)
-
-add_custom_command(TARGET pte550w_tests
-        COMMENT "run tests"
-        POST_BUILD
-        WORKING_DIRECTORY ${pte550w_BINARY_DIR}/tests
-        COMMAND ${CMAKE_CTEST_COMMAND} -C $<CONFIGURATION> --output-on-failure
+br_add_driver_tests(pte550w
+        SOURCES commands.cpp
 )

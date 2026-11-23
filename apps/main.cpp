@@ -17,12 +17,25 @@
 // Created by armin on 23.09.25.
 //
 
+#include <cstdlib>
+#include <exception>
+#include <iostream>
+
 #include "BrThermal.h"
 
 int main(const int argc, char **argv)
 {
+    // An exception that escapes a C++ callback cannot unwind through libpappl.
+    // Leave one line that names the cause before the process ends.
+    std::set_terminate([]
+    {
+        std::cerr << "br-thermal: terminating, unhandled exception in a driver callback\n";
+        std::abort();
+    });
+
     BrThermal driver;
 
     driver.runServer(argc, argv);
 
+    return 0;
 }

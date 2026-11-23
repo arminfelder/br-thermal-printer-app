@@ -17,21 +17,29 @@
 // Created by armin on 23.09.25.
 //
 
-#include <cstring>
-#include <functional>
-#include <iostream>
-#include <ostream>
-#include <fstream>
+#include "driver_registry.h"
+#include <cups/ipp.h>
+#include <pappl/mainloop.h>
+#include <string_view>
 
 extern "C" {
-    #include <pappl/pappl.h>
-    #include <pappl/base.h>
+   #include <pappl/base.h>
 }
 
 
 #include <string>
 
 #include "BrThermal.h"
+#include "util.h"
+
+BrThermal::BrThermal()
+{
+    drivers.reserve(registry::drivers.size());
+    for (const auto& entry : registry::drivers)
+    {
+        drivers.push_back({entry.name, entry.info, nullptr, nullptr});
+    }
+}
 
 void BrThermal::runServer(const int argc, char** argv)
 {
@@ -44,38 +52,39 @@ void BrThermal::runServer(const int argc, char** argv)
 const char* BrThermal::autoadd_cb([[maybe_unused]] const char* device_info, [[maybe_unused]] const char* device_uri, const char* device_id,
                                         [[maybe_unused]] void* extra)
 {
-    const char *ret = nullptr;
-    cups_option_t *did = nullptr;
-
-    const int num_did = papplDeviceParseID(device_id, &did);
-
-    // cupsGetOption returns a null pointer when the key is absent. std::string_view has no
-    // null constructor, thus a null pointer here calls strlen(nullptr).
-    if (const char *mdl = cupsGetOption("MDL", num_did, did); mdl != nullptr)
+    // PAPPL is C: an exception must not leave this callback.
+    try
     {
-        if (const std::string_view model(mdl); !model.empty() && driverMapping.contains(model))
-        {
-            ret = driverMapping.at(model).c_str();
-        }
+        const auto* entry = registry::forModel(util::modelFromDeviceId(device_id));
+        return entry != nullptr ? entry->name : nullptr;
     }
-    cupsFreeOptions(num_did, did);
-    return ret;
+    catch (...)
+    {
+        return nullptr;
+    }
 }
 
-bool BrThermal::driver_cb([[maybe_unused]] pappl_system_t* system, const char* driver_name, const char* device_uri,
-    const char* device_id, pappl_pr_driver_data_t* driver_data, [[maybe_unused]] ipp_t** driver_attrs, [[maybe_unused]] void* thiz)
+bool BrThermal::driver_cb(pappl_system_t* system, const char* driver_name, const char* device_uri,
+    const char* device_id, pappl_pr_driver_data_t* driver_data, ipp_t** driver_attrs, [[maybe_unused]] void* thiz)
 {
+    return util::guarded(system, [&]
+    {
+        return driverImpl(driver_name, device_uri, device_id, driver_data, driver_attrs);
+    });
+}
+
+bool BrThermal::driverImpl(const char* driver_name, const char* device_uri, const char* device_id,
+                           pappl_pr_driver_data_t* driver_data, ipp_t** driver_attrs)
+{
+    if (driver_data == nullptr)
+    {
+        return false;
+    }
     driver_data->format = "image/pwg-raster";
 
     // device_id is null when the client names the driver, for example an IPP Create-Printer
-    // that carries smi55357-driver. papplDeviceParseID then gives no options and
-    // cupsGetOption returns a null pointer, which std::string_view cannot hold.
-    cups_option_t *did = nullptr;
-    const int num_did = papplDeviceParseID(device_id, &did);
-    const char *mdl = cupsGetOption("MDL", num_did, did);
-    // Own the text: it must stay valid after the options are released.
-    std::string model(mdl != nullptr ? mdl : "");
-    cupsFreeOptions(num_did, did);
+    // that carries smi55357-driver. The model is then empty.
+    std::string model = util::modelFromDeviceId(device_id);
 
     if (model.empty() && device_uri != nullptr)
     {
@@ -98,14 +107,7 @@ bool BrThermal::driver_cb([[maybe_unused]] pappl_system_t* system, const char* d
         return false;
     }
 
-    if (std::string_view(driver_name) == "brother_td_2000")
-    {
-        return drivers::td2000::updateDriverData(driver_data, model);
-    }
-    if (std::string_view(driver_name) == "brother_pte550w_p750w_p710bt")
-    {
-        return drivers::pte550w::updateDriverData(driver_data, model);
-    }
-    return false;
+    const auto* entry = registry::byName(driver_name);
+    return entry != nullptr && entry->updateDriverData(driver_data, model, driver_attrs);
 }
 

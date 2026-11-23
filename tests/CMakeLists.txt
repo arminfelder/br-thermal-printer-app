@@ -13,38 +13,20 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-include(FetchContent)
+include(${PROJECT_SOURCE_DIR}/cmake/Catch2.cmake)
 
-FetchContent_Declare(
-        Catch2
-        GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-        GIT_TAG v3.12.0
+add_executable(registry_tests
+        registry.cpp
 )
-FetchContent_MakeAvailable(Catch2)
-if(TARGET Catch2)
-    target_compile_options(Catch2 PRIVATE
-            -Wno-error
-            -Wno-switch-enum
-    )
-endif()
-#
-#add_executable(br_thermal_tests
-#        util.cpp
-#        td2000.cpp
-#        td2000.cpp
-#)
-#
-#target_compile_features(br_thermal_tests PRIVATE cxx_std_26)
-#
-## If your project defines a library target, link it here.
-## (This keeps the test setup working even before you refactor src into a library.)
-#if(TARGET br_thermal)
-#    target_link_libraries(br_thermal_tests PRIVATE br_thermal)
-#elseif(TARGET br_thermal_lib)
-#    target_link_libraries(br_thermal_tests PRIVATE br_thermal_lib)
-#endif()
-#
-#target_link_libraries(br_thermal_tests PRIVATE Catch2::Catch2WithMain)
-#
-#include(Catch)
-#catch_discover_tests(br_thermal_tests)
+target_compile_features(registry_tests PRIVATE cxx_std_23)
+target_link_libraries(registry_tests PRIVATE Catch2::Catch2WithMain br_thermal)
+catch_discover_tests(registry_tests)
+
+# The PAPPL callbacks of each driver, with a PAPPL printer and job and the fake device.
+add_executable(pipeline_tests
+        pipeline.cpp
+)
+target_compile_features(pipeline_tests PRIVATE cxx_std_23)
+target_include_directories(pipeline_tests PRIVATE ${PROJECT_SOURCE_DIR}/src/drivers/_common/tests)
+target_link_libraries(pipeline_tests PRIVATE Catch2::Catch2WithMain br_thermal)
+catch_discover_tests(pipeline_tests)

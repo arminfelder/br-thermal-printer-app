@@ -14,656 +14,234 @@
 //    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "td2000.h"
+#include "units.h"
 
-#include <memory>
+#include <algorithm>
+#include <array>
+#include <bit>
+#include <cstddef>
+#include <cstdint>
+#include <mp-units/systems/si/unit_symbols.h>
 #include <optional>
-#include <span>
-#include <thread>
+#include <pappl/log.h>
+#include <pappl/printer.h>
+#include <string_view>
+#include <vector>
 
 extern "C" {
-#include <pappl/pappl.h>
 #include <pappl/base.h>
 }
 
+#include "driver_data.h"
+#include "raster_pipeline.h"
 #include "util.h"
 
 namespace drivers::td2000
 {
-    // Attempts one read from device and returns the status packet if valid.
-    // Spec §4 p.21-26 (ESC i S): status response is always 32 bytes; byte 0 (printHeadMark)
-    // is fixed at 80h. Returns nullopt when no complete valid packet arrived.
-    static std::optional<types::PrinterInfo> readStatusPacket(pappl_device_t *device)
+    namespace
     {
-        types::PrinterInfo info{};
-        const auto result = papplDeviceRead(device, info.raw.data(), info.raw.size());
-        if (result == static_cast<ssize_t>(info.raw.size()) &&
-            info.fields().printHeadMark == 0x80)
+        std::optional<types::MediaType> mediaTypeFor(const std::string_view ippType)
         {
-            return info;
+            if (ippType == "labels-continuous" || ippType == "continuous")
+            {
+                return types::MediaType::ContinuousLengthTape;
+            }
+            if (ippType == "labels")
+            {
+                return types::MediaType::DieCutLabels;
+            }
+            return std::nullopt;
         }
-        return std::nullopt;
+
+        bool send(const brother::pipeline::PageContext<types::ModelFamily>& ctx,
+                  const std::vector<uint8_t>& data, const char* what)
+        {
+            if (!util::writeToDevice(data, ctx.device, ctx.jobId))
+            {
+                papplLogJob(ctx.job, PAPPL_LOGLEVEL_ERROR, "failed to send %s", what);
+                return false;
+            }
+            return true;
+        }
+
+        struct Traits
+        {
+            using Model = types::ModelFamily;
+            using PrinterInfo = types::PrinterInfo;
+            using RasterGraphicsTransfer = commands::RasterGraphicsTransfer;
+
+            // Raster spec 2.1: 200 bytes of NULL for every TD-2000 model.
+            static size_t invalidateBytes(Model) { return 200; }
+            static constexpr bool compressRaster = false;
+
+            static const Model* modelFor(const std::string_view mdl)
+            {
+                const auto it = modelFamilyMap.find(mdl);
+                return it != modelFamilyMap.end() ? &it->second : nullptr;
+            }
+
+            static int headBytes(const Model family) { return lineWidth.at(family); }
+
+            static bool acceptsMediaType(const std::string_view ippType) { return mediaTypeFor(ippType).has_value(); }
+
+            // Raster spec flow chart 5.1: status request, then the control codes. ESC i a 01h
+            // selects raster mode. It must come before all raster data.
+            static bool startJob(const brother::pipeline::JobContext<Model>& ctx)
+            {
+                return brother::pipeline::checkStatusAtJobStart<PrinterInfo>(ctx) &&
+                       util::writeToDevice(commands::SwitchDynamicCommandMode{types::CommandMode::Raster}.get(),
+                                           ctx.device, ctx.jobId);
+            }
+
+            // Raster spec 2.1, the control codes of each page:
+            //   1. ESC i U  additional media information
+            //   2. ESC i z  print information
+            //   3. ESC i M  various mode settings
+            //   4. ESC i d  specify margin amount
+            //   5. M        select compression mode
+            static bool startPage(const brother::pipeline::PageContext<Model>& ctx)
+            {
+                const auto* options = ctx.options;
+                const auto requestedType = mediaTypeFor(options->media.type);
+                if (!requestedType)
+                {
+                    return false;
+                }
+                const auto mediaType = *requestedType;
+
+                // Warn one time for each page, not for each line, when the media is
+                // narrower than the print head. The line gets zero padding, thus the
+                // operator sees blank tape where an image can be expected.
+                if (const auto deliveredBytes = static_cast<size_t>(options->header.cupsBytesPerLine);
+                    deliveredBytes < static_cast<size_t>(ctx.data.bytesPerLine))
+                {
+                    papplLogJob(ctx.job, PAPPL_LOGLEVEL_WARN,
+                                "Raster line is %zu bytes but the print head is %d; "
+                                "media is narrower than the head, line will be padded",
+                                deliveredBytes, ctx.data.bytesPerLine);
+                }
+
+                // 1. ESC i U updates the media record of the printer.
+                const auto mediaWidth  = util::units::fromPwg(options->media.size_width);
+                const auto mediaLength = util::units::fromPwg(options->media.size_length);
+                const auto mediaInfo = media::getMediaInfoForMedia(ctx.data.model, mediaWidth, mediaLength, mediaType);
+                if (mediaInfo == media::none)
+                {
+                    papplLogJob(ctx.job, PAPPL_LOGLEVEL_ERROR, "Unsupported media dimensions for model family");
+                    return false;
+                }
+                if (!send(ctx, commands::AdditionalMediaInformation{mediaInfo}.get(), "additionalMediaInfo"))
+                {
+                    return false;
+                }
+
+                // 2. ESC i z. {n3}/{n4} must agree with the ESC i U record. {n5..n8} is the
+                // raster line count, little-endian. {n10} is fixed at 0.
+                types::PrintInfoFields info{};
+                info.mediaType = static_cast<uint8_t>(mediaType);
+                info.validFields = static_cast<uint8_t>(types::PrintInfoFlags::pi_kind) |
+                                   static_cast<uint8_t>(types::PrintInfoFlags::pi_width) |
+                                   static_cast<uint8_t>(types::PrintInfoFlags::pi_recover) |
+                                   static_cast<uint8_t>(types::PrintInfoFlags::pi_length);
+                info.pageType = ctx.pageType;
+                const auto printMedia = media::printInfoMedia(mediaInfo, mediaType, mediaLength);
+                info.mediaWidth  = printMedia.width;
+                info.mediaLength = printMedia.length;
+                if (!printMedia.lengthValid)
+                {
+                    info.validFields &= static_cast<uint8_t>(~static_cast<uint8_t>(types::PrintInfoFlags::pi_length));
+                }
+                const auto rasterBytes = std::bit_cast<std::array<uint8_t, 4>>(static_cast<uint32_t>(options->header.cupsHeight));
+                std::ranges::copy(rasterBytes, info.rasterNumber);
+                if (!send(ctx, commands::PrintInformation{info}.get(), "printInfo"))
+                {
+                    return false;
+                }
+
+                // 3. ESC i M: no rotation, no peeler.
+                constexpr types::VariousModeSettings settings{};
+                if (!send(ctx, commands::VariousModeSettings{settings}.get(), "variousModeSettings"))
+                {
+                    return false;
+                }
+
+                // 4. ESC i d: die-cut labels must use 0 ("only 0 is available").
+                const util::units::DotCount feedMargin =
+                    (mediaType == types::MediaType::ContinuousLengthTape)
+                        ? minFeedMargin.at(ctx.data.model)
+                        : 0 * util::units::dot;
+                if (!send(ctx,
+                          commands::SpecifyMarginAmount{
+                              static_cast<uint16_t>(feedMargin.numerical_value_in(util::units::dot))}.get(),
+                          "specifyMargin"))
+                {
+                    return false;
+                }
+
+                // 5. M 00h: no compression.
+                return send(ctx, commands::SelectCompressionMode{types::CompressionMode::NoCompression}.get(),
+                            "compressionModeCommand");
+            }
+
+            static unsigned statusReasons(const PrinterInfo& info) { return td2000::statusReasons(info); }
+            static bool pausesPrinting(const PrinterInfo& info) { return td2000::pausesPrinting(info); }
+            static bool resumesPrinting(const PrinterInfo& info) { return td2000::resumesPrinting(info); }
+
+            // All TD-2000 models answer ESC i S.
+            static bool pollsStatus(Model) { return true; }
+        };
+
+        using Pipeline = brother::pipeline::Pipeline<Traits>;
     }
 
-    namespace callbacks
+    namespace
     {
-        bool print(pappl_job_t *job, pappl_pr_options_t *options, pappl_device_t *device)
+        bool isNotification(const types::PrinterInfo& info, const types::NotificationNumber a,
+                            const types::NotificationNumber b)
         {
-            if (!job || !options || !device)
-            {
-                return false;
-            }
-            return true;
-        }
-
-        bool startJob(pappl_job_t *job, pappl_pr_options_t *options, pappl_device_t *device)
-        {
-            if (!job || !options || !device)
-            {
-                return false;
-            }
-
-            const auto jobId = papplJobGetID(job);
-
-            std::array<char, 128> deviceId{};
-            if (papplDeviceGetID(device, deviceId.data(), deviceId.size()) == nullptr)
-            {
-                return false;
-            }
-
-            cups_option_t *did = nullptr;
-            const int numOptions = papplDeviceParseID(deviceId.data(), &did);
-            const char *mdl = cupsGetOption("MDL", numOptions, did);
-            const std::string model = mdl ? mdl : "";
-            cupsFreeOptions(numOptions, did);
-
-            if (model.empty())
-            {
-                return false;
-            }
-            const auto familyIt = modelFamilyMap.find(model);
-            if (familyIt == modelFamilyMap.end())
-            {
-                papplLogJob(job, PAPPL_LOGLEVEL_ERROR, "Unknown model: %s", model.c_str());
-                return false;
-            }
-            const auto modelFamily = familyIt->second;
-
-            auto jobData = std::make_unique<types::JobData>(types::JobData{
-                .modelFamily = modelFamily,
-                .useCompression = false,
-                .bytesPerLine = lineWidth.at(modelFamily),
-            });
-
-            // Spec §2.1 p.5, §4 p.21: Invalidate (NULL × 200) — clears the print buffer
-            // and resets the printer to the receiving state.
-            if (const std::vector<uint8_t> data(200, 0); !util::writeToDevice(data, device, jobId))
-            {
-                return false;
-            }
-
-            // Spec §4 p.21: ESC @ (1Bh 40h) — Initialize; resets all mode settings.
-            // Also used to cancel a print job mid-transmission.
-            const commands::Initialize initialize;
-            if (!util::writeToDevice(initialize.get(), device, jobId))
-            {
-                return false;
-            }
-
-            // Spec §4 p.27: ESC i a (1Bh 69h 61h 01h) — Switch dynamic command mode;
-            // n=1 selects raster mode. Must precede all raster data.
-            const commands::SwitchDynamicCommandMode switchDynamicCommandMode{types::CommandMode::Raster};
-            if (!util::writeToDevice(switchDynamicCommandMode.get(), device, jobId))
-            {
-                return false;
-            }
-
-            // Spec §1 p.3-4, §4 p.21 (ESC i S note): once print data transmission begins
-            // the printer pushes status packets automatically — do not send ESC i S.
-            // Mark push mode so getStatus does not issue a status request command.
-            const auto printer = papplJobGetPrinter(job);
-            const auto uri = papplPrinterGetDeviceURI(printer);
-            {
-                std::lock_guard lock(printerStateMutex);
-                printerStatusPolling[uri] = true;
-            }
-
-            papplJobSetData(job, jobData.release()); // ownership transferred to the job
-            return true;
-        }
-
-        bool startPage(pappl_job_t *job, pappl_pr_options_t *options, pappl_device_t *device, unsigned pageNumber)
-        {
-            if (!job || !options || !device)
-            {
-                return false;
-            }
-            const auto jobId = papplJobGetID(job);
-
-            // Determine media type from IPP media-type string
-            types::MediaType mediaType{};
-            const std::string_view mediaTypeStr(options->media.type);
-            if (mediaTypeStr == "labels-continuous" || mediaTypeStr == "continuous")
-            {
-                mediaType = types::MediaType::ContinuousLengthTape;
-            }
-            else if (mediaTypeStr == "labels")
-            {
-                mediaType = types::MediaType::DieCutLabels;
-            }
-            else
-            {
-                papplLogJob(job, PAPPL_LOGLEVEL_ERROR, "unsupported media type: %s", options->media.type);
-                return false;
-            }
-
-            const auto jobData = static_cast<types::JobData*>(papplJobGetData(job));
-            if (!jobData)
-            {
-                papplLogJob(job, PAPPL_LOGLEVEL_ERROR, "jobData is null");
-                return false;
-            }
-
-            // Spec §2.1 p.5: per-page control-code order:
-            //   1. AdditionalMediaInformation  (ESC i U)
-            //   2. PrintInformation            (ESC i z)
-            //   3. VariousModeSettings         (ESC i M)
-            //   4. SpecifyMarginAmount         (ESC i d)
-            //   5. SelectCompressionMode       (M)
-
-            // Warn once per page, not per raster line, when the media is narrower than the
-            // print head. The line gets zero padding, thus the operator sees blank tape
-            // where an image can be expected.
-            if (const auto deliveredBytes = static_cast<size_t>(options->header.cupsBytesPerLine);
-                deliveredBytes < static_cast<size_t>(jobData->bytesPerLine))
-            {
-                papplLogJob(job, PAPPL_LOGLEVEL_WARN,
-                            "Raster line is %zu bytes but the print head is %d; "
-                            "media is narrower than the head, line will be padded",
-                            deliveredBytes, jobData->bytesPerLine);
-            }
-
-            // 1. Spec §4 p.27-28: ESC i U (1Bh 69h 55h 77h 01h + 127 bytes) —
-            //    Additional media information command; updates the printer's media info.
-            //    May be skipped if media has not changed since the last print.
-            const auto mediaWidth  = util::units::fromPwg(options->media.size_width);
-            const auto mediaLength = util::units::fromPwg(options->media.size_length);
-            const auto mediaInfo = media::getMediaInfoForMedia(jobData->modelFamily, mediaWidth, mediaLength, mediaType);
-            if (mediaInfo == media::none)
-            {
-                papplLogJob(job, PAPPL_LOGLEVEL_ERROR, "Unsupported media dimensions for model family");
-                return false;
-            }
-            const commands::AdditionalMediaInformation additionalMediaInfo{mediaInfo};
-            if (!util::writeToDevice(additionalMediaInfo.get(), device, jobId))
-            {
-                papplLogJob(job, PAPPL_LOGLEVEL_ERROR, "failed to send additionalMediaInfo");
-                return false;
-            }
-
-            // 2. Spec §4 p.29: ESC i z (1Bh 69h 7Ah + 10 bytes) — Print information command.
-            //    {n1} valid flags: PI_KIND=0x02 (media type), PI_WIDTH=0x04, PI_LENGTH=0x08,
-            //                      PI_RECOVER=0x80 (printer recovery on)
-            //    {n2} media type: 0x0A=continuous length tape, 0x0B=die-cut labels
-            //    {n3}/{n4} media width/length in mm
-            //    {n5-n8} raster line count, little-endian: count = n8*256³+n7*256²+n6*256+n5
-            //    {n9} page type: 0=starting page, 1=other pages
-            //    {n10} fixed at 0
-            types::PrintInfoFields info{};
-            info.mediaType = static_cast<uint8_t>(mediaType);
-            info.validFields = static_cast<uint8_t>(types::PrintInfoFlags::pi_kind) |
-                               static_cast<uint8_t>(types::PrintInfoFlags::pi_width) |
-                               static_cast<uint8_t>(types::PrintInfoFlags::pi_recover) |
-                               static_cast<uint8_t>(types::PrintInfoFlags::pi_length);
-            info.pageType = (pageNumber == 0) ? types::PageType::startingPage : types::PageType::otherPage;
-            const auto printMedia = media::printInfoMedia(mediaInfo, mediaType, mediaLength);
-            info.mediaWidth  = printMedia.width;
-            info.mediaLength = printMedia.length;
-            if (!printMedia.lengthValid)
-            {
-                info.validFields &= static_cast<uint8_t>(~static_cast<uint8_t>(types::PrintInfoFlags::pi_length));
-            }
-            // Raster number is 4 bytes little-endian (n5=LSB, n8=MSB).
-            const auto rasterLineCount = static_cast<uint32_t>(options->header.cupsHeight);
-            const auto rasterBytes = std::bit_cast<std::array<uint8_t, 4>>(rasterLineCount);
-            std::ranges::copy(rasterBytes, info.rasterNumber);
-
-            const commands::PrintInformation printInfo{info};
-            if (!util::writeToDevice(printInfo.get(), device, jobId))
-            {
-                papplLogJob(job, PAPPL_LOGLEVEL_ERROR, "failed to send printInfo");
-                return false;
-            }
-
-            // 3. Spec §4 p.30: ESC i M (1Bh 69h 4Dh {n}) — Various mode settings.
-            //    Bit 3: rotate 180°; Bit 4: peeler function. All others unused.
-            constexpr types::VariousModeSettings settings{};
-            const commands::VariousModeSettings variousModeSettings{settings};
-            if (!util::writeToDevice(variousModeSettings.get(), device, jobId))
-            {
-                papplLogJob(job, PAPPL_LOGLEVEL_ERROR, "failed to send variousModeSettings");
-                return false;
-            }
-
-            // 4. Spec §4 p.30: ESC i d (1Bh 69h 64h {n1} {n2}) — Specify margin amount.
-            //    margin(dots) = n1 + n2*256. Die-cut labels must use 0 ("only 0 is available").
-            const util::units::DotCount feedMargin =
-                (mediaType == types::MediaType::ContinuousLengthTape)
-                    ? minFeedMargin.at(jobData->modelFamily)
-                    : 0 * util::units::dot;
-            const commands::SpecifyMarginAmount specifyMargin(
-                feedMargin.numerical_value_in(util::units::dot), 0);
-            if (!util::writeToDevice(specifyMargin.get(), device, jobId))
-            {
-                papplLogJob(job, PAPPL_LOGLEVEL_ERROR, "failed to send specifyMargin");
-                return false;
-            }
-
-            // 5. Spec §4 p.31: M (4Dh {n}) — Select compression mode.
-            //    n=0: no compression; n=2: TIFF (PackBits). Only applies to raster data.
-            const commands::SelectCompressionMode compressionModeCommand{types::CompressionMode::NoCompression};
-            if (!util::writeToDevice(compressionModeCommand.get(), device, jobId))
-            {
-                papplLogJob(job, PAPPL_LOGLEVEL_ERROR, "failed to send compressionModeCommand");
-                return false;
-            }
-
-            return true;
-        }
-
-        // Maps a received PrinterInfo packet to PAPPL printer reasons.
-        // Replaces all previously set device-status reasons on every call.
-        void applyPrinterStatus(pappl_printer_t *printer, const types::PrinterInfo &info,
-                                const char *uri)
-        {
-            {
-                std::lock_guard lock(printerStateMutex);
-                printerStatus[uri] = info;
-            }
-
             const auto fields = info.fields();
-            if (fields.statusType == types::StatusType::ErrorOccurred)
-            {
-                unsigned int status = PAPPL_PREASON_NONE;
-                if (fields.errorInformation2.coverOpen)
-                    status |= PAPPL_PREASON_COVER_OPEN;
-                if (fields.errorInformation1.noMedia || fields.errorInformation1.endOfMedia)
-                    status |= PAPPL_PREASON_MEDIA_EMPTY | PAPPL_PREASON_MEDIA_NEEDED;
-                if (fields.errorInformation2.replacingMedia)
-                    status |= PAPPL_PREASON_MEDIA_NEEDED;
-                if (fields.errorInformation2.mediaCannotBeFed)
-                    status |= PAPPL_PREASON_MEDIA_JAM | PAPPL_PREASON_MEDIA_EMPTY;
-                if (fields.errorInformation1.printerInUse ||
-                    fields.errorInformation2.systemError ||
-                    fields.errorInformation2.communicationError)
-                    status |= PAPPL_PREASON_OTHER;
-                papplPrinterSetReasons(printer, static_cast<pappl_preason_t>(status),
-                                       PAPPL_PREASON_DEVICE_STATUS);
-            }
-            else if (fields.statusType == types::StatusType::TurnedOff)
-            {
-                papplPrinterSetReasons(printer, PAPPL_PREASON_OFFLINE,
-                                       PAPPL_PREASON_DEVICE_STATUS);
-            }
-            else if (fields.statusType == types::StatusType::Notification)
-            {
-                if (fields.notificationNumber == types::NotificationNumber::CoolingStarted ||
-                    fields.notificationNumber == types::NotificationNumber::WaitingForPeeling ||
-                    fields.notificationNumber == types::NotificationNumber::PrinterPaused)
-                {
-                    papplPrinterSetReasons(printer, PAPPL_PREASON_OTHER,
-                                           PAPPL_PREASON_DEVICE_STATUS);
-                }
-                else
-                {
-                    papplPrinterSetReasons(printer, PAPPL_PREASON_NONE,
-                                           PAPPL_PREASON_DEVICE_STATUS);
-                }
-            }
-            else
-            {
-                papplPrinterSetReasons(printer, PAPPL_PREASON_NONE, PAPPL_PREASON_DEVICE_STATUS);
-            }
+            return fields.statusType == types::StatusType::Notification &&
+                   (fields.notificationNumber == a || fields.notificationNumber == b);
         }
+    }
 
-        // Reads from device until the printer signals it has resumed after cooling or a pause.
-        // Spec §5.4 p.38 (cooling flow), §5.5 p.39 (peeling flow): during cooling the printer
-        // returns zero-length USB packets; a Notification packet with CoolingFinished (04h) or
-        // FinishedPrinterPaused (08h) signals that data transmission may resume.
-        bool waitForPrinterResume(pappl_job_t *job, pappl_device_t *device,
-                                   pappl_printer_t *printer, const char *uri)
-        {
-            constexpr int kMaxWaitMs = 120'000; // 2 minutes
-            constexpr int kDelayMs   = 100;
+    unsigned statusReasons(const types::PrinterInfo& info)
+    {
+        using types::NotificationNumber;
+        const auto fields = info.fields();
+        unsigned status = PAPPL_PREASON_NONE;
+        if (fields.errorInformation2.coverOpen)
+            status |= PAPPL_PREASON_COVER_OPEN;
+        if (fields.errorInformation1.noMedia || fields.errorInformation1.endOfMedia)
+            status |= PAPPL_PREASON_MEDIA_EMPTY | PAPPL_PREASON_MEDIA_NEEDED;
+        if (fields.errorInformation2.replacingMedia)
+            status |= PAPPL_PREASON_MEDIA_NEEDED;
+        if (fields.errorInformation2.mediaCannotBeFed)
+            status |= PAPPL_PREASON_MEDIA_JAM | PAPPL_PREASON_MEDIA_EMPTY;
+        if (fields.errorInformation2.systemError || fields.errorInformation2.communicationError)
+            status |= PAPPL_PREASON_OTHER;
+        // "Printer in use" can be set while this job prints. Report it only in an error block.
+        if (fields.errorInformation1.printerInUse && fields.statusType == types::StatusType::ErrorOccurred)
+            status |= PAPPL_PREASON_OTHER;
 
-            for (int waited = 0; waited < kMaxWaitMs; waited += kDelayMs)
-            {
-                if (const auto packet = readStatusPacket(device))
-                {
-                    const auto fields = packet->fields();
-                    applyPrinterStatus(printer, *packet, uri);
-                    if (fields.statusType == types::StatusType::Notification &&
-                        (fields.notificationNumber == types::NotificationNumber::CoolingFinished ||
-                         fields.notificationNumber == types::NotificationNumber::FinishedPrinterPaused))
-                    {
-                        papplLogJob(job, PAPPL_LOGLEVEL_INFO, "Printer resumed");
-                        return true;
-                    }
-                    if (fields.statusType == types::StatusType::ErrorOccurred)
-                    {
-                        papplLogJob(job, PAPPL_LOGLEVEL_ERROR,
-                                    "Printer error while waiting to resume");
-                        return false;
-                    }
-                    // Other packets (phase changes, etc.): keep waiting
-                }
-                std::this_thread::sleep_for(std::chrono::milliseconds(kDelayMs));
-            }
-            papplLogJob(job, PAPPL_LOGLEVEL_ERROR, "Timed out waiting for printer to resume");
-            return false;
-        }
+        if (fields.statusType == types::StatusType::TurnedOff)
+            status |= PAPPL_PREASON_OFFLINE;
+        if (pausesPrinting(info) ||
+            isNotification(info, NotificationNumber::WaitingForPeeling, NotificationNumber::WaitingForPeeling))
+            status |= PAPPL_PREASON_OTHER;
+        return status;
+    }
 
-        bool writeLine(pappl_job_t *job, pappl_pr_options_t *options, pappl_device_t *device, [[maybe_unused]] unsigned pageNumber, const unsigned char *pixels)
-        {
-            if (!pixels || !options || !job || !device)
-            {
-                return false;
-            }
-            const auto jobData = static_cast<types::JobData*>(papplJobGetData(job));
-            if (!jobData)
-            {
-                papplLogJob(job, PAPPL_LOGLEVEL_ERROR, "jobData is null");
-                return false;
-            }
+    bool pausesPrinting(const types::PrinterInfo& info)
+    {
+        return isNotification(info, types::NotificationNumber::CoolingStarted,
+                              types::NotificationNumber::PrinterPaused);
+    }
 
-            const auto bytesPerLine = jobData->bytesPerLine;
-
-            // Size the span from what PAPPL allocated, not from the head width. PAPPL
-            // calculates cupsBytesPerLine from the media geometry, thus media that is
-            // narrower than the head gives a shorter buffer. buildHeadLine clamps the line
-            // and then pads it back to the head width.
-            const auto deliveredBytes = static_cast<size_t>(options->header.cupsBytesPerLine);
-#ifdef __clang__
-#pragma clang unsafe_buffer_usage begin
-#endif
-            const std::span lineData(pixels, deliveredBytes);
-#ifdef __clang__
-#pragma clang unsafe_buffer_usage end
-#endif
-
-            const auto mirroredLine = util::buildHeadLine(
-                lineData,
-                static_cast<size_t>(options->header.cupsWidth),
-                static_cast<size_t>(bytesPerLine) * 8);
-
-            // Spec §4 p.33: g (67h 00h {n} {d1..dn}) — Raster graphics transfer.
-            // {n} = number of bytes: 56 for Td2x2x (203 dpi), 84 for Td2x3x (300 dpi)
-            // when no compression is selected. With TIFF compression the byte count
-            // reflects the compressed payload size.
-            std::vector<uint8_t> rasterCmd;
-            if (!jobData->useCompression)
-            {
-                const commands::RasterGraphicsTransfer rgt{bytesPerLine, mirroredLine};
-                rasterCmd = rgt.get();
-            }
-            else
-            {
-                const auto compressed = util::compressLine(mirroredLine);
-                const commands::RasterGraphicsTransfer rgt{static_cast<int>(lineData.size()), compressed};
-                rasterCmd = rgt.get();
-            }
-
-            const auto printer = papplJobGetPrinter(job);
-            const auto uri     = papplPrinterGetDeviceURI(printer);
-
-            // Write with one cooling/pause retry (spec §5 p.34, §5.4 p.38 cooling flow,
-            // §5.5 p.39 peeling flow). papplDeviceWrite is used directly so a transient
-            // write failure (USB NAK during cooling) does not close the device.
-            for (int retry = 0; retry <= 1; ++retry)
-            {
-                const auto written = papplDeviceWrite(device, rasterCmd.data(), rasterCmd.size());
-                if (written == static_cast<ssize_t>(rasterCmd.size()))
-                {
-                    papplDeviceFlush(device);
-
-                    // Single non-blocking read: pick up any pushed status packet
-                    // (phase change, error, or notification sent during transmission).
-                    if (const auto packet = readStatusPacket(device))
-                    {
-                        const auto fields = packet->fields();
-                        applyPrinterStatus(printer, *packet, uri);
-
-                        if (fields.statusType == types::StatusType::ErrorOccurred)
-                        {
-                            papplLogJob(job, PAPPL_LOGLEVEL_ERROR,
-                                        "Printer error during raster transmission");
-                            return false;
-                        }
-                        // Cooling or pause that started after a successful write:
-                        // the line was accepted — wait for resume before the next line.
-                        if (fields.statusType == types::StatusType::Notification &&
-                            (fields.notificationNumber == types::NotificationNumber::CoolingStarted ||
-                             fields.notificationNumber == types::NotificationNumber::PrinterPaused))
-                        {
-                            papplLogJob(job, PAPPL_LOGLEVEL_INFO,
-                                        "Printer cooling/paused after write, waiting to resume");
-                            if (!waitForPrinterResume(job, device, printer, uri))
-                                return false;
-                        }
-                    }
-                    return true;
-                }
-
-                if (retry >= 1) break;
-
-                // Write failed — printer likely NAK'd during cooling (spec §5.4 p.38).
-                // Read status to confirm the cause and wait for resume before retrying.
-                papplLogJob(job, PAPPL_LOGLEVEL_WARN,
-                            "Raster write failed, checking for cooling or pause");
-
-                std::optional<types::PrinterInfo> statusPacket;
-                constexpr int kStatusAttempts = 20; // 20 × 50 ms = 1 s
-                for (int attempt = 0; attempt < kStatusAttempts; ++attempt)
-                {
-                    statusPacket = readStatusPacket(device);
-                    if (statusPacket) break;
-                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-                }
-
-                if (!statusPacket)
-                {
-                    papplLogJob(job, PAPPL_LOGLEVEL_ERROR,
-                                "Write failed and could not read printer status");
-                    return false;
-                }
-
-                const auto fields = statusPacket->fields();
-                applyPrinterStatus(printer, *statusPacket, uri);
-
-                if (fields.statusType == types::StatusType::Notification &&
-                    (fields.notificationNumber == types::NotificationNumber::CoolingStarted ||
-                     fields.notificationNumber == types::NotificationNumber::PrinterPaused))
-                {
-                    papplLogJob(job, PAPPL_LOGLEVEL_INFO,
-                                "Printer cooling/paused, waiting to resume before retry");
-                    if (!waitForPrinterResume(job, device, printer, uri))
-                        return false;
-                    // Fall through to retry the write
-                }
-                else
-                {
-                    return false; // ErrorOccurred or unexpected failure
-                }
-            }
-
-            papplLogJob(job, PAPPL_LOGLEVEL_ERROR, "Failed to write raster line after retry");
-            return false;
-        }
-
-        bool endPage(pappl_job_t *job, pappl_pr_options_t *options, pappl_device_t *device, const unsigned pageNumber)
-        {
-            if (!job || !options || !device)
-            {
-                return false;
-            }
-
-            if (const auto pageCount = static_cast<unsigned>(papplJobGetImpressions(job)); pageNumber < pageCount - 1)
-            {
-                // Spec §4 p.33: FF (0Ch) — Print command; used at the end of every page
-                // except the last in a multi-page job.
-                const commands::Print print;
-                if (const auto job_id = papplJobGetID(job); !util::writeToDevice(print.get(), device, job_id))
-                {
-                    papplLogJob(job, PAPPL_LOGLEVEL_ERROR, "failed to send print command");
-                    return false;
-                }
-            }
-
-            return true;
-        }
-
-        bool endJob(pappl_job_t *job, pappl_pr_options_t *options, pappl_device_t *device)
-        {
-            if (!job || !options || !device)
-            {
-                return false;
-            }
-            const auto jobId = papplJobGetID(job);
-
-            // Spec §4 p.33: Control-Z (1Ah) — Print command with feeding; used at the
-            // end of the last page to trigger printing and media feed.
-            const commands::PrintWithFeeding printWithFeeding;
-            if (!util::writeToDevice(printWithFeeding.get(), device, jobId))
-            {
-                papplLogJob(job, PAPPL_LOGLEVEL_ERROR, "failed to send printWithFeeding command");
-                return false;
-            }
-
-            // Spec §5.1 p.35 (concurrent printing normal flow): after the final print
-            // command the printer pushes PhaseChange "Printing" (06h/01h), then
-            // PrintingCompleted (01h), then PhaseChange "Waiting to receive" (06h/00h).
-            // Drain these so the device is clean for the next job and end-of-job
-            // errors are captured.
-            constexpr int kMaxAttempts = 200; // 200 × 20 ms = 4 s timeout
-            for (int attempt = 0; attempt < kMaxAttempts; ++attempt)
-            {
-                if (const auto packet = readStatusPacket(device))
-                {
-                    const auto fields = packet->fields();
-                    if (fields.statusType == types::StatusType::PhaseChange &&
-                        fields.phaseType == types::Phase::ReceivingState)
-                    {
-                        break; // Printer back to receiving state — done
-                    }
-                    if (fields.statusType == types::StatusType::ErrorOccurred)
-                    {
-                        papplLogJob(job, PAPPL_LOGLEVEL_ERROR,
-                                    "Printer reported error during job completion");
-                        break;
-                    }
-                    // PhaseChange "Printing", PrintingCompleted, Notification: keep reading
-                    continue;
-                }
-                std::this_thread::sleep_for(std::chrono::milliseconds(20));
-            }
-
-            // Return to pull mode so getStatus can send ESC i S again
-            const auto printer = papplJobGetPrinter(job);
-            const auto uri = papplPrinterGetDeviceURI(printer);
-            {
-                std::lock_guard lock(printerStateMutex);
-                printerStatusPolling[uri] = false;
-            }
-
-            const auto jobData = static_cast<types::JobData *>(papplJobGetData(job));
-            papplJobSetData(job, nullptr);
-            delete jobData;
-
-            return true;
-        }
-
-        bool getStatus(pappl_printer_t *printer)
-        {
-            const auto uri = papplPrinterGetDeviceURI(printer);
-
-            bool inPushMode = false;
-            {
-                std::lock_guard lock(printerStateMutex);
-                printerStatusPolling.try_emplace(uri, false);
-                inPushMode = printerStatusPolling.at(uri);
-            }
-
-            if (inPushMode)
-            {
-                // Spec §4 p.21 (ESC i S note): "do not send this command while printing;
-                // error information is automatically sent by the printer during printing."
-                // Attempt one non-blocking read to pick up any pushed packet (phase change,
-                // error, or notification). Spec §4 p.25 (table 6): phase statuses are sent
-                // as PhaseChange (06h) packets with PhaseType printing(01h)/receiving(00h).
-                const auto device = papplPrinterOpenDevice(printer);
-                if (!device)
-                {
-                    return true; // Device unavailable — keep current reasons
-                }
-
-                if (const auto packet = readStatusPacket(device))
-                {
-                    applyPrinterStatus(printer, *packet, uri);
-                }
-                papplPrinterCloseDevice(printer);
-                return true;
-            }
-
-            // Pull mode: Spec §4 p.21: ESC i S (1Bh 69h 53h) — Status information request.
-            // Response is 32 bytes; byte 0 (printHeadMark) fixed at 80h (spec §4 p.22).
-            const auto device = papplPrinterOpenDevice(printer);
-            if (!device)
-            {
-                papplLogPrinter(printer, PAPPL_LOGLEVEL_WARN,
-                                "getStatus: could not open device");
-                return false;
-            }
-
-            const commands::StatusInformationRequest cmd;
-            if (!util::writeToDevice(cmd.get(), device, -1))
-            {
-                papplPrinterCloseDevice(printer);
-                return false;
-            }
-
-            std::optional<types::PrinterInfo> received;
-            constexpr int kMaxAttempts = 100; // 100 × 10 ms = 1 s timeout
-            for (int attempt = 0; attempt < kMaxAttempts; ++attempt)
-            {
-                received = readStatusPacket(device);
-                if (received) break;
-
-                // readStatusPacket returns nullopt both on short reads and on read errors;
-                // check for a hard error by re-reading with a fresh buffer
-                types::PrinterInfo probe{};
-                if (papplDeviceRead(device, probe.raw.data(), probe.raw.size()) < 0)
-                {
-                    papplLogPrinter(printer, PAPPL_LOGLEVEL_ERROR, "Failed to read status");
-                    papplPrinterCloseDevice(printer);
-                    papplPrinterSetReasons(printer,
-                                          PAPPL_PREASON_OTHER | PAPPL_PREASON_OFFLINE,
-                                          PAPPL_PREASON_DEVICE_STATUS);
-                    return false;
-                }
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
-            }
-
-            papplPrinterCloseDevice(printer);
-
-            if (!received)
-            {
-                papplLogPrinter(printer, PAPPL_LOGLEVEL_WARN,
-                                "getStatus: timed out waiting for status response");
-                return false;
-            }
-
-            applyPrinterStatus(printer, *received, uri);
-            return true;
-        }
+    bool resumesPrinting(const types::PrinterInfo& info)
+    {
+        return isNotification(info, types::NotificationNumber::CoolingFinished,
+                              types::NotificationNumber::FinishedPrinterPaused);
     }
 
     namespace media
@@ -721,7 +299,7 @@ namespace drivers::td2000
 
         PrintInfoMedia printInfoMedia(const types::MediaInfo& info,
                                       const types::MediaType type,
-                                      const util::units::MediaSize requestedLength) noexcept
+                                      [[maybe_unused]] const util::units::MediaSize requestedLength) noexcept
         {
             const auto record = info.fields();
 
@@ -731,129 +309,37 @@ namespace drivers::td2000
                 return {record.paperWidth, record.paperLengthMm, true};
             }
 
-            // Continuous tape: the record gives the tape width, the job gives the length.
-            const auto lengthMm = util::units::toWholeMillimetres(requestedLength);
-            if (lengthMm < 0 || lengthMm > 255)
-            {
-                // {n4} is one byte. Spec 2.3.4 permits up to 1000 mm, thus long jobs cannot
-                // declare their length. Clear PI_LENGTH instead of sending a truncated value.
-                return {record.paperWidth, 0, false};
-            }
-            return {record.paperWidth, static_cast<uint8_t>(lengthMm), true};
+            // Continuous tape: raster spec 4 table (3) (a) fixes the media length at 00h.
+            return {record.paperWidth, 0, false};
         }
     }
 
-    bool updateDriverData(pappl_pr_driver_data_t* driverData, const std::string_view& model)
+    bool updateDriverData(pappl_pr_driver_data_t* driverData, const std::string_view& model,
+                          [[maybe_unused]] ipp_t** driverAttrs)
     {
-        if (!driverData)
+        // An unknown model must give a clean IPP failure, not an exception that
+        // terminates the server.
+        const auto family = Traits::modelFor(model);
+        if (!driverData || !family)
         {
             return false;
         }
 
-        const auto familyIt = modelFamilyMap.find(model);
-        if (familyIt == modelFamilyMap.end())
+        static constexpr std::array<const char*, 1> sources{"main-roll"};
+        const brother::DriverDataSpec spec{
+            .model      = model,
+            .kind       = static_cast<pappl_kind_t>(PAPPL_KIND_RECEIPT | PAPPL_KIND_LABEL),
+            .resolutions = std::span(&resolutions.at(*family), 1),
+            .margins    = margins.at(*family),
+            .media      = defaultMedia,
+            .mediaTypes = mediaTypes,
+            .sources    = sources,
+        };
+        if (!brother::fillDriverData(driverData, spec))
         {
-            // An unknown model must give a clean IPP failure, not an exception that
-            // terminates the server.
             return false;
         }
-        const auto family = familyIt->second;
-        const std::string makeAndModel = std::format("Brother {}", model);
-
-        std::vector<const char *> media{defaultMedia.begin(), defaultMedia.end()};
-
-        driverData->printfile_cb = callbacks::print;
-        driverData->rendjob_cb = callbacks::endJob;
-        driverData->rendpage_cb = callbacks::endPage;
-        driverData->rstartjob_cb = callbacks::startJob;
-        driverData->rstartpage_cb = callbacks::startPage;
-        driverData->rwriteline_cb = callbacks::writeLine;
-        driverData->status_cb = callbacks::getStatus;
-        driverData->output_face_up = true;
-        driverData->input_face_up = true;
-
-        driverData->kind = PAPPL_KIND_RECEIPT | PAPPL_KIND_LABEL;
-
-        papplCopyString(driverData->make_and_model, makeAndModel.c_str(), sizeof(driverData->make_and_model));
-
-        driverData->ppm = 1;
-
-        driverData->orient_default = IPP_ORIENT_PORTRAIT;
-        driverData->color_supported = PAPPL_COLOR_MODE_MONOCHROME;
-        driverData->color_default = PAPPL_COLOR_MODE_MONOCHROME;
-        driverData->content_default = PAPPL_CONTENT_TEXT;
-        driverData->quality_default = IPP_QUALITY_NORMAL;
-
-        driverData->raster_types = PAPPL_PWG_RASTER_TYPE_BLACK_1;
-        driverData->force_raster_type = PAPPL_PWG_RASTER_TYPE_BLACK_1;
-
-        driverData->duplex = PAPPL_DUPLEX_NONE;
-        driverData->sides_supported = PAPPL_SIDES_ONE_SIDED;
-        driverData->sides_default = PAPPL_SIDES_ONE_SIDED;
-        driverData->finishings = PAPPL_FINISHINGS_NONE;
-
-        driverData->num_resolution = 1;
-
-        driverData->x_resolution[0] = resolutions.at(family).x;
-        driverData->y_resolution[0] = resolutions.at(family).y;
-
-        driverData->x_default = resolutions.at(family).x;
-        driverData->y_default = resolutions.at(family).y;
-
-        driverData->left_right = 0;
-        driverData->bottom_top = 0;
-
-        driverData->num_source = 1;
-        driverData->source[0] = "main-roll";
-
-        driverData->num_type = static_cast<int>(mediaTypes.size());
-        std::ranges::copy(mediaTypes, driverData->type);
-
-        driverData->num_media = static_cast<int>(media.size());
-        std::ranges::copy(media, driverData->media);
-
-        if (driverData->num_media > 0)
-        {
-            // Use the first named media entry as the ready media.  Its dimensions
-            // must fall within the [roll_min, roll_max] range checked by
-            // papplPrinterSetDriverData / validate_ready — a zero-length entry
-            // (roll_current_58x0mm) would fail that range check even though
-            // length-dim = 0 is valid per PWG 5101.1 §5.1.3.
-            papplCopyString(driverData->media_ready[0].size_name, defaultMedia[0], sizeof(driverData->media_ready[0].size_name));
-            if (const pwg_media_t *pwg = pwgMediaForPWG(driverData->media_ready[0].size_name))
-            {
-                driverData->media_ready[0].size_width  = pwg->width;
-                driverData->media_ready[0].size_length = pwg->length;
-                driverData->media_ready[0].bottom_margin = util::units::toPwg(margins.at(family).bottom);
-                driverData->media_ready[0].left_margin   = util::units::toPwg(margins.at(family).left);
-                driverData->media_ready[0].right_margin  = util::units::toPwg(margins.at(family).right);
-                driverData->media_ready[0].top_margin    = util::units::toPwg(margins.at(family).top);
-
-                papplCopyString(driverData->media_ready[0].source, driverData->source[0], sizeof(driverData->media_ready[0].source));
-                papplCopyString(driverData->media_ready[0].type,   driverData->type[0],   sizeof(driverData->media_ready[0].type));
-            }
-            else
-            {
-                return false;
-            }
-
-            papplCopyString(driverData->media_default.size_name, defaultMedia[0], sizeof(driverData->media_default.size_name));
-            if (const pwg_media_t *pwg = pwgMediaForPWG(driverData->media_default.size_name))
-            {
-                driverData->media_default.size_width  = pwg->width;
-                driverData->media_default.size_length = pwg->length;
-                driverData->media_default.bottom_margin = util::units::toPwg(margins.at(family).bottom);
-                driverData->media_default.left_margin   = util::units::toPwg(margins.at(family).left);
-                driverData->media_default.right_margin  = util::units::toPwg(margins.at(family).right);
-                driverData->media_default.top_margin    = util::units::toPwg(margins.at(family).top);
-                papplCopyString(driverData->media_default.type, driverData->type[0], sizeof(driverData->media_default.type));
-            }
-            else
-            {
-                return false;
-            }
-        }
-
+        Pipeline::install(driverData, *family);
         return true;
     }
 }

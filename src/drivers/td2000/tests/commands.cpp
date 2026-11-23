@@ -18,7 +18,8 @@
 //
 
 #include <catch2/catch_test_macros.hpp>
-#include <iostream>
+#include <cstdint>
+#include <vector>
 
 #include "td2000.h"
 
@@ -27,28 +28,28 @@ using namespace drivers::td2000;
 TEST_CASE("SwitchDynamicCommandMode::get() returns correct command", "[SwitchDynamicCommandMode]") {
 
     SECTION("Returns correct size for ESCP mode") {
-        commands::SwitchDynamicCommandMode cmd(types::CommandMode::ESCP);
+        commands::SwitchDynamicCommandMode const cmd(types::CommandMode::ESCP);
         auto result = cmd.get();
 
         REQUIRE(result.size() == 4);
     }
 
     SECTION("Returns correct size for Raster mode") {
-        commands::SwitchDynamicCommandMode cmd(types::CommandMode::Raster);
+        commands::SwitchDynamicCommandMode const cmd(types::CommandMode::Raster);
         auto result = cmd.get();
 
         REQUIRE(result.size() == 4);
     }
 
     SECTION("Returns correct size for PTouch mode") {
-        commands::SwitchDynamicCommandMode cmd(types::CommandMode::PTouch);
+        commands::SwitchDynamicCommandMode const cmd(types::CommandMode::PTouch);
         auto result = cmd.get();
 
         REQUIRE(result.size() == 4);
     }
 
     SECTION("Contains correct command header") {
-        commands::SwitchDynamicCommandMode cmd(types::CommandMode::ESCP);
+        commands::SwitchDynamicCommandMode const cmd(types::CommandMode::ESCP);
         auto result = cmd.get();
 
         REQUIRE(result.size() == 4);
@@ -59,7 +60,7 @@ TEST_CASE("SwitchDynamicCommandMode::get() returns correct command", "[SwitchDyn
     }
 
     SECTION("Sets correct mode byte for ESCP") {
-        commands::SwitchDynamicCommandMode cmd(types::CommandMode::ESCP);
+        commands::SwitchDynamicCommandMode const cmd(types::CommandMode::ESCP);
         auto result = cmd.get();
 
         REQUIRE(result.size() == 4);
@@ -68,7 +69,7 @@ TEST_CASE("SwitchDynamicCommandMode::get() returns correct command", "[SwitchDyn
     }
 
     SECTION("Sets correct mode byte for Raster") {
-        commands::SwitchDynamicCommandMode cmd(types::CommandMode::Raster);
+        commands::SwitchDynamicCommandMode const cmd(types::CommandMode::Raster);
         auto result = cmd.get();
 
         REQUIRE(result.size() == 4);
@@ -77,7 +78,7 @@ TEST_CASE("SwitchDynamicCommandMode::get() returns correct command", "[SwitchDyn
     }
 
     SECTION("Sets correct mode byte for PTouch") {
-        commands::SwitchDynamicCommandMode cmd(types::CommandMode::PTouch);
+        commands::SwitchDynamicCommandMode const cmd(types::CommandMode::PTouch);
         auto result = cmd.get();
 
         REQUIRE(result.size() == 4);
@@ -86,7 +87,7 @@ TEST_CASE("SwitchDynamicCommandMode::get() returns correct command", "[SwitchDyn
     }
 
     SECTION("Returns complete command for Raster mode") {
-        commands::SwitchDynamicCommandMode cmd(types::CommandMode::Raster);
+        commands::SwitchDynamicCommandMode const cmd(types::CommandMode::Raster);
         auto result = cmd.get();
 
         std::vector<uint8_t> expected = {0x1B, 0x69, 0x61, 0x01};
@@ -94,7 +95,7 @@ TEST_CASE("SwitchDynamicCommandMode::get() returns correct command", "[SwitchDyn
     }
 
     SECTION("Multiple calls return same result") {
-        commands::SwitchDynamicCommandMode cmd(types::CommandMode::PTouch);
+        commands::SwitchDynamicCommandMode const cmd(types::CommandMode::PTouch);
 
         auto result1 = cmd.get();
         auto result2 = cmd.get();
@@ -106,7 +107,7 @@ TEST_CASE("SwitchDynamicCommandMode::get() returns correct command", "[SwitchDyn
 TEST_CASE("SwitchDynamicCommandMode produces correct byte sequences", "[SwitchDynamicCommandMode]") {
 
     SECTION("ESCP mode command") {
-        commands::SwitchDynamicCommandMode cmd(types::CommandMode::ESCP);
+        commands::SwitchDynamicCommandMode const cmd(types::CommandMode::ESCP);
         auto result = cmd.get();
 
         std::vector<uint8_t> expected = {0x1B, 0x69, 0x61, 0x00};
@@ -114,7 +115,7 @@ TEST_CASE("SwitchDynamicCommandMode produces correct byte sequences", "[SwitchDy
     }
 
     SECTION("Raster mode command") {
-        commands::SwitchDynamicCommandMode cmd(types::CommandMode::Raster);
+        commands::SwitchDynamicCommandMode const cmd(types::CommandMode::Raster);
         auto result = cmd.get();
 
         std::vector<uint8_t> expected = {0x1B, 0x69, 0x61, 0x01};
@@ -122,7 +123,7 @@ TEST_CASE("SwitchDynamicCommandMode produces correct byte sequences", "[SwitchDy
     }
 
     SECTION("PTouch mode command") {
-        commands::SwitchDynamicCommandMode cmd(types::CommandMode::PTouch);
+        commands::SwitchDynamicCommandMode const cmd(types::CommandMode::PTouch);
         auto result = cmd.get();
 
         std::vector<uint8_t> expected = {0x1B, 0x69, 0x61, 0x03};
@@ -134,16 +135,16 @@ TEST_CASE("SwitchDynamicCommandMode produces correct byte sequences", "[SwitchDy
 TEST_CASE("VariousModeSettings::get() returns correct command", "[VariousModeSettings]") {
 
     SECTION("Returns correct size with default settings") {
-        types::VariousModeSettings settings{};
-        commands::VariousModeSettings cmd(settings);
+        types::VariousModeSettings const settings{};
+        commands::VariousModeSettings const cmd(settings);
         auto result = cmd.get();
 
         REQUIRE(result.size() == 4);  // 3 bytes header + 1 byte settings
     }
 
     SECTION("Contains correct command header") {
-        types::VariousModeSettings settings{};
-        commands::VariousModeSettings cmd(settings);
+        types::VariousModeSettings const settings{};
+        commands::VariousModeSettings const cmd(settings);
         auto result = cmd.get();
 
         REQUIRE(result.size() >= 3);
@@ -156,7 +157,7 @@ TEST_CASE("VariousModeSettings::get() returns correct command", "[VariousModeSet
         types::VariousModeSettings settings{};
         settings.raw[0] = 0x00;
 
-        commands::VariousModeSettings cmd(settings);
+        commands::VariousModeSettings const cmd(settings);
         auto result = cmd.get();
 
         REQUIRE(result.size() == 4);
@@ -170,7 +171,7 @@ TEST_CASE("VariousModeSettings::get() returns correct command", "[VariousModeSet
         fields.peeler = false;
         settings.set_fields(fields);
 
-        commands::VariousModeSettings cmd(settings);
+        commands::VariousModeSettings const cmd(settings);
         auto result = cmd.get();
 
         REQUIRE(result.size() == 4);
@@ -184,7 +185,7 @@ TEST_CASE("VariousModeSettings::get() returns correct command", "[VariousModeSet
         fields.peeler = true;
         settings.set_fields(fields);
 
-        commands::VariousModeSettings cmd(settings);
+        commands::VariousModeSettings const cmd(settings);
         auto result = cmd.get();
 
         REQUIRE(result.size() == 4);
@@ -198,7 +199,7 @@ TEST_CASE("VariousModeSettings::get() returns correct command", "[VariousModeSet
         fields.peeler = true;
         settings.set_fields(fields);
 
-        commands::VariousModeSettings cmd(settings);
+        commands::VariousModeSettings const cmd(settings);
         auto result = cmd.get();
 
         REQUIRE(result.size() == 4);
@@ -209,7 +210,7 @@ TEST_CASE("VariousModeSettings::get() returns correct command", "[VariousModeSet
         types::VariousModeSettings settings{};
         settings.raw[0] = 0x42;
 
-        commands::VariousModeSettings cmd(settings);
+        commands::VariousModeSettings const cmd(settings);
         auto result = cmd.get();
 
         std::vector<uint8_t> expected = {0x1B, 0x69, 0x4D, 0x42};
@@ -220,7 +221,7 @@ TEST_CASE("VariousModeSettings::get() returns correct command", "[VariousModeSet
         types::VariousModeSettings settings{};
         settings.raw[0] = 0xFF;
 
-        commands::VariousModeSettings cmd(settings);
+        commands::VariousModeSettings const cmd(settings);
         auto result1 = cmd.get();
         auto result2 = cmd.get();
 
@@ -231,7 +232,7 @@ TEST_CASE("VariousModeSettings::get() returns correct command", "[VariousModeSet
         types::VariousModeSettings settings{};
         settings.raw[0] = 0xAA;  // 10101010 pattern
 
-        commands::VariousModeSettings cmd(settings);
+        commands::VariousModeSettings const cmd(settings);
         auto result = cmd.get();
 
         REQUIRE(result[3] == 0xAA);
@@ -241,8 +242,8 @@ TEST_CASE("VariousModeSettings::get() returns correct command", "[VariousModeSet
 TEST_CASE("PrintInformation::get() returns correct command", "[PrintInformation]") {
 
     SECTION("Returns correct size with default PrintInfo") {
-        types::PrintInfoFields info{};
-        commands::PrintInformation cmd(info);
+        types::PrintInfoFields const info{};
+        commands::PrintInformation const cmd(info);
         auto result = cmd.get();
 
         // ESC i z is the 3-byte header plus the 10-byte PrintInfoFields payload.
@@ -250,8 +251,8 @@ TEST_CASE("PrintInformation::get() returns correct command", "[PrintInformation]
     }
 
     SECTION("Contains correct command header") {
-        types::PrintInfoFields info{};
-        commands::PrintInformation cmd(info);
+        types::PrintInfoFields const info{};
+        commands::PrintInformation const cmd(info);
         auto result = cmd.get();
 
         REQUIRE(result[0] == 0x1B);
@@ -260,8 +261,8 @@ TEST_CASE("PrintInformation::get() returns correct command", "[PrintInformation]
     }
 
     SECTION("Returns complete command sequence") {
-        types::PrintInfoFields info{};
-        commands::PrintInformation cmd(info);
+        types::PrintInfoFields const info{};
+        commands::PrintInformation const cmd(info);
         auto result = cmd.get();
 
         std::vector<uint8_t> expected = {0x1B, 0x69, 0x7A,
@@ -270,8 +271,8 @@ TEST_CASE("PrintInformation::get() returns correct command", "[PrintInformation]
     }
 
     SECTION("Multiple calls return same result") {
-        types::PrintInfoFields info{};
-        commands::PrintInformation cmd(info);
+        types::PrintInfoFields const info{};
+        commands::PrintInformation const cmd(info);
 
         auto result1 = cmd.get();
         auto result2 = cmd.get();
@@ -286,7 +287,7 @@ TEST_CASE("PrintInformation::get() returns correct command", "[PrintInformation]
         info.mediaLength = 100;
 
         {
-            commands::PrintInformation cmd(info);
+            commands::PrintInformation const cmd(info);
             auto result = cmd.get();
             REQUIRE_FALSE(result.empty());
         }
@@ -301,7 +302,7 @@ TEST_CASE("PrintInformation::get() returns correct command", "[PrintInformation]
         info.mediaType = static_cast<uint8_t>(types::MediaType::ContinuousLengthTape);
         info.mediaWidth = 57;
 
-        commands::PrintInformation cmd(info);
+        commands::PrintInformation const cmd(info);
         auto result = cmd.get();
 
         REQUIRE(result.size() == 3 + sizeof(types::PrintInfoFields));
@@ -312,99 +313,44 @@ TEST_CASE("PrintInformation::get() returns correct command", "[PrintInformation]
 }
 
 TEST_CASE("SpecifyMarginAmount::get() returns correct command", "[SpecifyMarginAmount]") {
+    // Raster spec 4, ESC i d: margin amount (dots) = n1 + n2 * 256.
 
-    SECTION("Returns correct size") {
-        commands::SpecifyMarginAmount cmd(0, 0);
-        auto result = cmd.get();
-
-        REQUIRE(result.size() == 5);  // 3 bytes header + 2 bytes (before + after)
+    SECTION("Returns the header and one 16-bit value") {
+        const auto result = commands::SpecifyMarginAmount{0}.get();
+        REQUIRE(result == std::vector<uint8_t>{0x1B, 0x69, 0x64, 0x00, 0x00});
     }
 
-    SECTION("Contains correct command header") {
-        commands::SpecifyMarginAmount cmd(0, 0);
-        auto result = cmd.get();
-
-        REQUIRE(result[0] == 0x1B);
-        REQUIRE(result[1] == 0x69);
-        REQUIRE(result[2] == 0x64);
+    SECTION("A value below 256 uses only n1") {
+        REQUIRE(commands::SpecifyMarginAmount{35}.get() == std::vector<uint8_t>{0x1B, 0x69, 0x64, 0x23, 0x00});
     }
 
-    SECTION("Appends before and after margins correctly with zero values") {
-        commands::SpecifyMarginAmount cmd(0, 0);
-        auto result = cmd.get();
-
-        REQUIRE(result[3] == 0x00);
-        REQUIRE(result[4] == 0x00);
+    SECTION("A value of 256 or more sets n2") {
+        REQUIRE(commands::SpecifyMarginAmount{300}.get() == std::vector<uint8_t>{0x1B, 0x69, 0x64, 0x2C, 0x01});
     }
 
-    SECTION("Appends before margin correctly") {
-        commands::SpecifyMarginAmount cmd(10, 0);
-        auto result = cmd.get();
-
-        REQUIRE(result[3] == 0x0A);
-        REQUIRE(result[4] == 0x00);
-    }
-
-    SECTION("Appends after margin correctly") {
-        commands::SpecifyMarginAmount cmd(0, 20);
-        auto result = cmd.get();
-
-        REQUIRE(result[3] == 0x00);
-        REQUIRE(result[4] == 0x14);
-    }
-
-    SECTION("Appends both margins correctly") {
-        commands::SpecifyMarginAmount cmd(15, 25);
-        auto result = cmd.get();
-
-        REQUIRE(result[3] == 0x0F);
-        REQUIRE(result[4] == 0x19);
-    }
-
-    SECTION("Returns complete command sequence") {
-        commands::SpecifyMarginAmount cmd(5, 10);
-        auto result = cmd.get();
-
-        std::vector<uint8_t> expected = {0x1B, 0x69, 0x64, 0x05, 0x0A};
-        REQUIRE(result == expected);
-    }
-
-    SECTION("Handles maximum uint8_t values") {
-        commands::SpecifyMarginAmount cmd(255, 255);
-        auto result = cmd.get();
-
-        REQUIRE(result[3] == 0xFF);
-        REQUIRE(result[4] == 0xFF);
-    }
-
-    SECTION("Multiple calls return same result") {
-        commands::SpecifyMarginAmount cmd(30, 40);
-
-        auto result1 = cmd.get();
-        auto result2 = cmd.get();
-
-        REQUIRE(result1 == result2);
+    SECTION("The spec maximum for 300 dpi, 1500 dots") {
+        REQUIRE(commands::SpecifyMarginAmount{1500}.get() == std::vector<uint8_t>{0x1B, 0x69, 0x64, 0xDC, 0x05});
     }
 }
 
 TEST_CASE("SelectCompressionMode::get() returns correct command", "[SelectCompressionMode]") {
 
     SECTION("Returns correct size for NoCompression mode") {
-        commands::SelectCompressionMode cmd(types::CompressionMode::NoCompression);
+        commands::SelectCompressionMode const cmd(types::CompressionMode::NoCompression);
         auto result = cmd.get();
 
         REQUIRE(result.size() == 2);  // 1 byte header + 1 byte mode
     }
 
     SECTION("Returns correct size for Compression mode") {
-        commands::SelectCompressionMode cmd(types::CompressionMode::Compression);
+        commands::SelectCompressionMode const cmd(types::CompressionMode::Compression);
         auto result = cmd.get();
 
         REQUIRE(result.size() == 2);
     }
 
     SECTION("Contains correct command header") {
-        commands::SelectCompressionMode cmd(types::CompressionMode::NoCompression);
+        commands::SelectCompressionMode const cmd(types::CompressionMode::NoCompression);
         auto result = cmd.get();
 
         REQUIRE(result.size() >= 1);
@@ -412,7 +358,7 @@ TEST_CASE("SelectCompressionMode::get() returns correct command", "[SelectCompre
     }
 
     SECTION("Sets correct mode byte for NoCompression") {
-        commands::SelectCompressionMode cmd(types::CompressionMode::NoCompression);
+        commands::SelectCompressionMode const cmd(types::CompressionMode::NoCompression);
         auto result = cmd.get();
 
         REQUIRE(result.size() == 2);
@@ -421,7 +367,7 @@ TEST_CASE("SelectCompressionMode::get() returns correct command", "[SelectCompre
     }
 
     SECTION("Sets correct mode byte for Compression") {
-        commands::SelectCompressionMode cmd(types::CompressionMode::Compression);
+        commands::SelectCompressionMode const cmd(types::CompressionMode::Compression);
         auto result = cmd.get();
 
         REQUIRE(result.size() == 2);
@@ -430,7 +376,7 @@ TEST_CASE("SelectCompressionMode::get() returns correct command", "[SelectCompre
     }
 
     SECTION("Returns complete command for NoCompression mode") {
-        commands::SelectCompressionMode cmd(types::CompressionMode::NoCompression);
+        commands::SelectCompressionMode const cmd(types::CompressionMode::NoCompression);
         auto result = cmd.get();
 
         std::vector<uint8_t> expected = {0x4D, 0x00};
@@ -438,7 +384,7 @@ TEST_CASE("SelectCompressionMode::get() returns correct command", "[SelectCompre
     }
 
     SECTION("Returns complete command for Compression mode") {
-        commands::SelectCompressionMode cmd(types::CompressionMode::Compression);
+        commands::SelectCompressionMode const cmd(types::CompressionMode::Compression);
         auto result = cmd.get();
 
         std::vector<uint8_t> expected = {0x4D, 0x02};
@@ -446,7 +392,7 @@ TEST_CASE("SelectCompressionMode::get() returns correct command", "[SelectCompre
     }
 
     SECTION("Multiple calls return same result") {
-        commands::SelectCompressionMode cmd(types::CompressionMode::Compression);
+        commands::SelectCompressionMode const cmd(types::CompressionMode::Compression);
 
         auto result1 = cmd.get();
         auto result2 = cmd.get();
@@ -458,24 +404,24 @@ TEST_CASE("SelectCompressionMode::get() returns correct command", "[SelectCompre
 TEST_CASE("RasterGraphicsTransfer::get() returns correct command", "[RasterGraphicsTransfer]") {
 
     SECTION("Returns correct size with empty raster data") {
-        std::vector<uint8_t> rasterData;
-        commands::RasterGraphicsTransfer cmd(0, rasterData);
+        std::vector<uint8_t> const rasterData;
+        commands::RasterGraphicsTransfer const cmd(0, rasterData);
         auto result = cmd.get();
 
         REQUIRE(result.size() == 3);  // 1 byte header + 2 bytes (0 + numberOfBytes)
     }
 
     SECTION("Returns correct size with raster data") {
-        std::vector<uint8_t> rasterData = {0xAA, 0xBB, 0xCC, 0xDD};
-        commands::RasterGraphicsTransfer cmd(4, rasterData);
+        std::vector<uint8_t> const rasterData = {0xAA, 0xBB, 0xCC, 0xDD};
+        commands::RasterGraphicsTransfer const cmd(4, rasterData);
         auto result = cmd.get();
 
         REQUIRE(result.size() == 7);  // 1 byte header + 2 bytes + 4 bytes data
     }
 
     SECTION("Contains correct command header") {
-        std::vector<uint8_t> rasterData = {0x01, 0x02};
-        commands::RasterGraphicsTransfer cmd(2, rasterData);
+        std::vector<uint8_t> const rasterData = {0x01, 0x02};
+        commands::RasterGraphicsTransfer const cmd(2, rasterData);
         auto result = cmd.get();
 
         REQUIRE(result.size() >= 1);
@@ -483,24 +429,24 @@ TEST_CASE("RasterGraphicsTransfer::get() returns correct command", "[RasterGraph
     }
 
     SECTION("Second byte is always zero") {
-        std::vector<uint8_t> rasterData = {0xFF, 0xFF, 0xFF};
-        commands::RasterGraphicsTransfer cmd(3, rasterData);
+        std::vector<uint8_t> const rasterData = {0xFF, 0xFF, 0xFF};
+        commands::RasterGraphicsTransfer const cmd(3, rasterData);
         auto result = cmd.get();
 
         REQUIRE(result[1] == 0x00);
     }
 
     SECTION("Third byte contains numberOfBytes") {
-        std::vector<uint8_t> rasterData = {0x01, 0x02, 0x03, 0x04, 0x05};
-        commands::RasterGraphicsTransfer cmd(5, rasterData);
+        std::vector<uint8_t> const rasterData = {0x01, 0x02, 0x03, 0x04, 0x05};
+        commands::RasterGraphicsTransfer const cmd(5, rasterData);
         auto result = cmd.get();
 
         REQUIRE(result[2] == 0x05);
     }
 
     SECTION("Appends raster data correctly") {
-        std::vector<uint8_t> rasterData = {0xDE, 0xAD, 0xBE, 0xEF};
-        commands::RasterGraphicsTransfer cmd(4, rasterData);
+        std::vector<uint8_t> const rasterData = {0xDE, 0xAD, 0xBE, 0xEF};
+        commands::RasterGraphicsTransfer const cmd(4, rasterData);
         auto result = cmd.get();
 
         REQUIRE(result[3] == 0xDE);
@@ -510,8 +456,8 @@ TEST_CASE("RasterGraphicsTransfer::get() returns correct command", "[RasterGraph
     }
 
     SECTION("Returns complete command sequence") {
-        std::vector<uint8_t> rasterData = {0x11, 0x22, 0x33};
-        commands::RasterGraphicsTransfer cmd(3, rasterData);
+        std::vector<uint8_t> const rasterData = {0x11, 0x22, 0x33};
+        commands::RasterGraphicsTransfer const cmd(3, rasterData);
         auto result = cmd.get();
 
         std::vector<uint8_t> expected = {0x67, 0x00, 0x03, 0x11, 0x22, 0x33};
@@ -519,8 +465,8 @@ TEST_CASE("RasterGraphicsTransfer::get() returns correct command", "[RasterGraph
     }
 
     SECTION("Handles maximum uint8_t numberOfBytes") {
-        std::vector<uint8_t> rasterData(255, 0xAA);
-        commands::RasterGraphicsTransfer cmd(255, rasterData);
+        std::vector<uint8_t> const rasterData(255, 0xAA);
+        commands::RasterGraphicsTransfer const cmd(255, rasterData);
         auto result = cmd.get();
 
         REQUIRE(result[2] == 0xFF);
@@ -528,8 +474,8 @@ TEST_CASE("RasterGraphicsTransfer::get() returns correct command", "[RasterGraph
     }
 
     SECTION("Handles typical line width for Td2x2x (56 bytes)") {
-        std::vector<uint8_t> rasterData(56, 0xFF);
-        commands::RasterGraphicsTransfer cmd(56, rasterData);
+        std::vector<uint8_t> const rasterData(56, 0xFF);
+        commands::RasterGraphicsTransfer const cmd(56, rasterData);
         auto result = cmd.get();
 
         REQUIRE(result[2] == 56);
@@ -537,8 +483,8 @@ TEST_CASE("RasterGraphicsTransfer::get() returns correct command", "[RasterGraph
     }
 
     SECTION("Handles typical line width for Td2x3x (84 bytes)") {
-        std::vector<uint8_t> rasterData(84, 0xFF);
-        commands::RasterGraphicsTransfer cmd(84, rasterData);
+        std::vector<uint8_t> const rasterData(84, 0xFF);
+        commands::RasterGraphicsTransfer const cmd(84, rasterData);
         auto result = cmd.get();
 
         REQUIRE(result[2] == 84);
@@ -546,8 +492,8 @@ TEST_CASE("RasterGraphicsTransfer::get() returns correct command", "[RasterGraph
     }
 
     SECTION("Multiple calls return same result") {
-        std::vector<uint8_t> rasterData = {0x12, 0x34, 0x56};
-        commands::RasterGraphicsTransfer cmd(3, rasterData);
+        std::vector<uint8_t> const rasterData = {0x12, 0x34, 0x56};
+        commands::RasterGraphicsTransfer const cmd(3, rasterData);
 
         auto result1 = cmd.get();
         auto result2 = cmd.get();
@@ -556,8 +502,8 @@ TEST_CASE("RasterGraphicsTransfer::get() returns correct command", "[RasterGraph
     }
 
     SECTION("Preserves all bits in raster data") {
-        std::vector<uint8_t> rasterData = {0x00, 0xFF, 0xAA, 0x55};
-        commands::RasterGraphicsTransfer cmd(4, rasterData);
+        std::vector<uint8_t> const rasterData = {0x00, 0xFF, 0xAA, 0x55};
+        commands::RasterGraphicsTransfer const cmd(4, rasterData);
         auto result = cmd.get();
 
         REQUIRE(result[3] == 0x00);
@@ -570,21 +516,21 @@ TEST_CASE("RasterGraphicsTransfer::get() returns correct command", "[RasterGraph
 TEST_CASE("ZeroRasterGraphics::get() returns correct command", "[ZeroRasterGraphics]") {
 
     SECTION("Returns correct size") {
-        commands::ZeroRasterGraphics cmd;
+        commands::ZeroRasterGraphics const cmd;
         auto result = cmd.get();
 
         REQUIRE(result.size() == 1);
     }
 
     SECTION("Contains correct command byte") {
-        commands::ZeroRasterGraphics cmd;
+        commands::ZeroRasterGraphics const cmd;
         auto result = cmd.get();
 
         REQUIRE(result[0] == 0x5A);
     }
 
     SECTION("Returns complete command sequence") {
-        commands::ZeroRasterGraphics cmd;
+        commands::ZeroRasterGraphics const cmd;
         auto result = cmd.get();
 
         std::vector<uint8_t> expected = {0x5A};
@@ -592,7 +538,7 @@ TEST_CASE("ZeroRasterGraphics::get() returns correct command", "[ZeroRasterGraph
     }
 
     SECTION("Multiple calls return same result") {
-        commands::ZeroRasterGraphics cmd;
+        commands::ZeroRasterGraphics const cmd;
 
         auto result1 = cmd.get();
         auto result2 = cmd.get();
@@ -601,7 +547,7 @@ TEST_CASE("ZeroRasterGraphics::get() returns correct command", "[ZeroRasterGraph
     }
 
     SECTION("Default constructed object works correctly") {
-        commands::ZeroRasterGraphics cmd{};
+        commands::ZeroRasterGraphics const cmd{};
         auto result = cmd.get();
 
         REQUIRE_FALSE(result.empty());
@@ -610,7 +556,7 @@ TEST_CASE("ZeroRasterGraphics::get() returns correct command", "[ZeroRasterGraph
 
     SECTION("Object can be constructed and destructed without issues") {
         {
-            commands::ZeroRasterGraphics cmd;
+            commands::ZeroRasterGraphics const cmd;
             auto result = cmd.get();
             REQUIRE_FALSE(result.empty());
         }
@@ -622,21 +568,21 @@ TEST_CASE("ZeroRasterGraphics::get() returns correct command", "[ZeroRasterGraph
 TEST_CASE("Print::get() returns correct command", "[Print]") {
 
     SECTION("Returns correct size") {
-        commands::Print cmd;
+        commands::Print const cmd;
         auto result = cmd.get();
 
         REQUIRE(result.size() == 1);
     }
 
     SECTION("Contains correct command byte") {
-        commands::Print cmd;
+        commands::Print const cmd;
         auto result = cmd.get();
 
         REQUIRE(result[0] == 0x0C);
     }
 
     SECTION("Returns complete command sequence") {
-        commands::Print cmd;
+        commands::Print const cmd;
         auto result = cmd.get();
 
         std::vector<uint8_t> expected = {0x0C};
@@ -644,7 +590,7 @@ TEST_CASE("Print::get() returns correct command", "[Print]") {
     }
 
     SECTION("Multiple calls return same result") {
-        commands::Print cmd;
+        commands::Print const cmd;
 
         auto result1 = cmd.get();
         auto result2 = cmd.get();
@@ -653,7 +599,7 @@ TEST_CASE("Print::get() returns correct command", "[Print]") {
     }
 
     SECTION("Default constructed object works correctly") {
-        commands::Print cmd{};
+        commands::Print const cmd{};
         auto result = cmd.get();
 
         REQUIRE_FALSE(result.empty());
@@ -662,11 +608,64 @@ TEST_CASE("Print::get() returns correct command", "[Print]") {
 
     SECTION("Object can be constructed and destructed without issues") {
         {
-            commands::Print cmd;
+            commands::Print const cmd;
             auto result = cmd.get();
             REQUIRE_FALSE(result.empty());
         }
         // Destructor called here - test passes if no crash/leak
         REQUIRE(true);
     }
+}
+namespace
+{
+    types::PrinterInfo statusBlock(std::initializer_list<std::pair<size_t, uint8_t>> bytes)
+    {
+        types::PrinterInfo info{};
+        info.raw[0] = 0x80;
+        info.raw[1] = 0x20;
+        for (const auto& [offset, value] : bytes)
+            info.raw.at(offset) = value;
+        return info;
+    }
+}
+
+TEST_CASE("status - phase number offset 20 is the high byte", "[status]")
+{
+    // Raster spec 4, status table: offset 20 = higher order, offset 21 = lower order.
+    const auto fields = statusBlock({{20, 0x01}, {21, 0x02}}).fields();
+    REQUIRE(fields.phaseNumberHigh == 0x01);
+    REQUIRE(fields.phaseNumberLow == 0x02);
+}
+
+TEST_CASE("status - media type uses the status codes 4Ah and 4Bh", "[status]")
+{
+    REQUIRE(statusBlock({{11, 0x4A}}).fields().mediaType == types::StatusMediaType::ContinuousLengthTape);
+    REQUIRE(statusBlock({{11, 0x4B}}).fields().mediaType == types::StatusMediaType::DieCutLabels);
+}
+
+TEST_CASE("statusReasons - error bits count in a reply to a status request", "[status]")
+{
+    // Status type 00h with error information 2 bit 4 = cover open.
+    REQUIRE(statusReasons(statusBlock({{18, 0x00}, {9, 0x10}})) == PAPPL_PREASON_COVER_OPEN);
+}
+
+TEST_CASE("statusReasons - cooling notification is reported", "[status]")
+{
+    REQUIRE(statusReasons(statusBlock({{18, 0x05}, {22, 0x03}})) == PAPPL_PREASON_OTHER);
+}
+
+TEST_CASE("pausesPrinting and resumesPrinting - cooling and pause notifications", "[status]")
+{
+    REQUIRE(pausesPrinting(statusBlock({{18, 0x05}, {22, 0x03}})));
+    REQUIRE(pausesPrinting(statusBlock({{18, 0x05}, {22, 0x07}})));
+    REQUIRE(resumesPrinting(statusBlock({{18, 0x05}, {22, 0x04}})));
+    REQUIRE(resumesPrinting(statusBlock({{18, 0x05}, {22, 0x08}})));
+    REQUIRE_FALSE(pausesPrinting(statusBlock({{18, 0x00}, {22, 0x03}})));
+}
+
+TEST_CASE("statusReasons - printer-in-use bit outside an error block is no reason", "[status]")
+{
+    // Error information 1 bit 4. A phase change during this job must not raise a reason.
+    REQUIRE(statusReasons(statusBlock({{18, 0x06}, {8, 0x10}})) == PAPPL_PREASON_NONE);
+    REQUIRE(statusReasons(statusBlock({{18, 0x02}, {8, 0x10}})) == PAPPL_PREASON_OTHER);
 }
